@@ -1,0 +1,20 @@
+{
+ "goldens": {
+  "burrau.ticks300.golden.json": "41159fb567e9ac881f640fb645cdafdf1de07f58be207c3de8013d5d32d8132c",
+  "butterfly-i.ticks300.golden.json": "69833807b4c2330b5c8d24790fd76f0e6617525b520f38f47f91b7f1cf24aedf",
+  "chaos-random.ticks300.golden.json": "909fb9fefd31e7beeb368cc74629148d9bd4a6f86a22299c426b1b35c339c63c",
+  "figure-8.third_period.golden.json": "cf6ce3b6630efd4fb6199e225f848fe919733d6c79434a31285700d81a834b9f",
+  "figure-8.ticks300.golden.json": "d25b13f5b211f8eba646bf1a793fd38e2310889087358cfcd9115561b9b18627",
+  "lagrange-chaos.ticks300.golden.json": "374acba16bb5a4c5e9424b8573c31886ecac8b2c3a993f7c6468acb7211dd9c3",
+  "moth-i.ticks300.golden.json": "dead750bad7d9f1fcd22a83dbc77d3f15e395f7ef76bd5b8d14393a460e3dd74",
+  "planet-of-two-stars.ticks300.golden.json": "c149a9ffc57c5a4c9bebd6f7a7c6f0911a9f0ea2f98a3858f9a28446dab57598",
+  "star-planet-moon.ticks300.golden.json": "070e22400d87d810777cc4f263fea0d5e31b51c8d014982894a1b8678c7531fd",
+  "yarn.ticks300.golden.json": "aae0c5eba15b5e4cd99e7bf48cdc003f19fd55084748fb544265843dd19de885",
+  "yin-yang-i.ticks300.golden.json": "db05fb5051fb3be23cfb579135c62d6146c815aa8a83be78d0cb4ac727408779"
+ },
+ "operator": {
+  "name": "forest_ruth4",
+  "src_sha256": "fe4c706b691827bfc043ec960e63a38f58210f08b7d5ae66085083d3445b1397",
+  "version": "1.0.0"
+ }
+}
