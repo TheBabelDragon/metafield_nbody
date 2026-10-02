@@ -1,0 +1,13 @@
+{
+ "checkpoints": [],
+ "duck_horizon_ticks": 300,
+ "eta": 0.01,
+ "final": {},
+ "golden_version": 1,
+ "initial": {},
+ "key": "7",
+ "kind": "ticks",
+ "operator": {"name": "forest_ruth4", "src_sha256": "fe4c706b691827bfc043ec960e63a38f58210f08b7d5ae66085083d3445b1397", "version": "1.0.0"},
+ "scenario": "burrau",
+ "tag": "ticks300"
+}
