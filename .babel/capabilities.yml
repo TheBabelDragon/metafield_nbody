@@ -1,0 +1,31 @@
+capabilities:
+  - id: nbody.scenario.select
+    description: Select scenario by key (1-9,0) or name.
+    command: select
+    args: {scenario: {type: string, enum_keys: ["1","2","3","4","5","6","7","8","9","0"]}}
+    scenarios:
+      "1": figure-8
+      "2": butterfly-i
+      "3": moth-i
+      "4": yin-yang-i
+      "5": yarn
+      "6": lagrange-chaos
+      "7": burrau
+      "8": star-planet-moon
+      "9": planet-of-two-stars
+      "0": chaos-random
+    mutates: true
+  - {id: nbody.step,   command: step,   args: {n: {type: integer, minimum: 1}}, mutates: true,  emits: FieldTick}
+  - {id: nbody.run_until, python: "NBodyField.run_until", args: {t: {type: number}}, mutates: true, emits: FieldTick}
+  - {id: nbody.pause,  command: pause,  mutates: true,  emits: nothing}
+  - {id: nbody.resume, command: resume, mutates: true,  emits: nothing}
+  - {id: nbody.reset,  command: reset,  mutates: true,  emits: FieldTick}
+  - {id: nbody.quit,   command: quit,   mutates: true,  terminal: true}
+  - {id: nbody.invariants, python: "NBodyField.invariants", mutates: false, returns: [energy, momentum, angular_momentum, energy_drift]}
+  - {id: nbody.replay, python: "metafield_nbody.replay", mutates: false, description: "Admit + replay a FieldTick log from deltas alone."}
+  - {id: nbody.verify, command: "python -m metafield_nbody.checker", mutates: false}
+emits:
+  deltas: [gravity.body_state, gravity.invariants]
+  origin: synthetic
+rejects:
+  - physical observations (ContractViolation)

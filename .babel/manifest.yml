@@ -1,0 +1,28 @@
+# babel-interface discovery manifest
+babel: "0.1"
+name: metafield-nbody
+version: 1.0.0
+title: Gravitational N-body Field (three-body and general N)
+description: >
+  Deterministic Newtonian N-body field (Forest-Ruth 4th-order symplectic,
+  adaptive dt). Emits only synthetic FieldDeltas grouped into hash-chained
+  FieldTicks; replayable and independently verifiable.
+stack:
+  field_os_contract: "0.1"
+  host: metafield-engine
+  origin: synthetic            # never physical
+entrypoints:
+  run:    "python -m metafield_nbody --scenario {scenario} --until {t} --log {path}"
+  repl:   "python -m metafield_nbody"
+  verify: "python -m metafield_nbody.checker"
+  regen:  "python -m metafield_nbody.checker --regen"
+python_api: "metafield_nbody.NBodyField"
+schemas:
+  field_delta: schemas/field_delta.schema.json
+  field_tick:  schemas/field_tick.schema.json
+  provenance:  schemas/provenance.schema.json
+  observation: schemas/observation.schema.json   # declared only to be refused
+operators:
+  lockfile: ../operators.lock.json
+  goldens:  ../tests/golden/
+capabilities: capabilities.yml
