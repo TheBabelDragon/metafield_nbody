@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "metafield-nbody/field_delta",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "version", "delta_id", "address", "field", "op", "value", "t", "origin", "provenance"],
+  "properties": {
+    "kind": {"const": "FieldDelta"},
+    "version": {"const": "0.1"},
+    "delta_id": {"type": "string", "pattern": "^[A-Za-z0-9_.:/-]+$"},
+    "address": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["space", "cell"],
+      "properties": {"space": {"type": "string"}, "cell": {"type": "string"}}
+    },
+    "field": {"type": "string", "enum": ["gravity.body_state", "gravity.invariants"]},
+    "op": {"const": "set"},
+    "value": {"type": "object"},
+    "t": {"type": "number"},
+    "origin": {"const": "synthetic"},
+    "provenance": {"$ref": "provenance.schema.json"}
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "metafield-nbody/field_tick",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "version", "scenario", "tick", "t", "dt", "prev_digest", "deltas", "digest"],
+  "properties": {
+    "kind": {"const": "FieldTick"},
+    "version": {"const": "0.1"},
+    "scenario": {"type": "string"},
+    "tick": {"type": "integer", "minimum": 0},
+    "t": {"type": "number"},
+    "dt": {"type": "number", "minimum": 0},
+    "prev_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "deltas": {"type": "array", "minItems": 1, "items": {"$ref": "field_delta.schema.json"}},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

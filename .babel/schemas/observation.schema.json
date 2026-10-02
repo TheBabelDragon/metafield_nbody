@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "metafield-nbody/observation",
+  "description": "Physical observations. Declared so the N-body field can REJECT them: synthetic and physical never mix.",
+  "type": "object",
+  "required": ["kind", "origin"],
+  "properties": {"kind": {"const": "Observation"}, "origin": {"const": "physical"}}
+}
