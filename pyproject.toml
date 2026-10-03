@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metafield-nbody"
+version = "1.0.0"
+description = "Deterministic gravitational N-body Field for MetaField / field-os"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "TheBabelDragon" }]
+keywords = ["n-body", "gravitation", "symplectic", "metafield", "field-os"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+metafield-nbody = "metafield_nbody.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/TheBabelDragon/metafield_nbody"
+Repository = "https://github.com/TheBabelDragon/metafield_nbody"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["metafield_nbody*"]
+
+[tool.setuptools.package-data]
+metafield_nbody = ["static/*"]
