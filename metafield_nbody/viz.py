@@ -1,4 +1,16 @@
-"""Local Celestial Field Observatory \u2014 scientific 3D visualization for NBodyField.\n\nArchitecture:\n  NBodyField (authoritative) \u2500\u2500\u25ba VizSession (state + history)\n                                      \u2502\n                                      \u25bc\n                              HTTP + SSE server (stdlib only)\n                                      \u2502\n                                      \u25bc\n                              Browser (Three.js + telemetry UI)\n\nLaunch:  python -m metafield_nbody viz [--scenario figure-8] [--port 8765]\n"""
+"""Local Celestial Field Observatory - scientific 3D visualization for NBodyField.
+
+Architecture:
+  NBodyField (authoritative) -> VizSession (state + history)
+                                      |
+                                      v
+                              HTTP server (stdlib only)
+                                      |
+                                      v
+                              Browser (Three.js + telemetry UI)
+
+Launch:  python -m metafield_nbody viz [--scenario figure-8] [--port 8765]
+"""
 from __future__ import annotations
 
 import argparse
@@ -14,6 +26,8 @@ from urllib.parse import parse_qs, urlparse
 from . import contract as C
 from . import physics as P
 from . import scenarios as S
+from . import lab as Lab
+from . import lab_http
 from .field import NBodyField
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -178,17 +192,12 @@ class VizSession:
                     "force": "Newtonian gravity with Plummer softening",
                     "equations": {
                         "dr_dt": "dr_i / dt = v_i",
-                        "dv_dt": "dv_i / dt = G \u03a3_{j\u2260i} m_j (r_j - r_i) / (|r_j - r_i|\u00b2 + \u03b5\u00b2)^{3/2}",
-                        "energy": "E = \u03a3 \u00bd m_i |v_i|\u00b2 \u2212 \u03a3_{i<j} G m_i m_j / \u221a(|r_i-r_j|\u00b2 + \u03b5\u00b2)",
-                        "momentum": "P = \u03a3 m_i v_i",
-                        "angular_momentum": "L = \u03a3 m_i (r_i \u00d7 v_i)",
+                        "dv_dt": "dv_i / dt = G sum m_j (r_j - r_i) / (|r_j - r_i|^2 + eps^2)^{3/2}",
                     },
                     "notes": [
                         "G = 1 (normalized units)",
-                        f"Softening \u03b5 = {P.SOFTENING} (Plummer)",
-                        "Adaptive dt = \u03b7 \u00b7 min(free-fall, fly-by) over pairs",
+                        "Softening eps = %s (Plummer)" % P.SOFTENING,
                         "Adaptive dt is not strictly symplectic",
-                        "Primary operator uses only + \u2212 * / \u221a (IEEE-754 bit-identical)",
                     ],
                 },
             }
@@ -237,7 +246,7 @@ class VizSession:
                 n = int(arg) if arg is not None else 1
                 self.playing = False
                 got = self.step(n)
-                return {"ok": True, "msg": f"{got} ticks"}
+                return {"ok": True, "msg": "%d ticks" % got}
             if cmd == "reset":
                 self.field.command("reset")
                 self.history = []
@@ -261,18 +270,19 @@ class VizSession:
                 try:
                     sp = float(arg)
                     self.speed = max(0.1, min(200.0, sp))
-                    return {"ok": True, "msg": f"speed={self.speed}"}
+                    return {"ok": True, "msg": "speed=%s" % self.speed}
                 except (TypeError, ValueError):
                     return {"ok": False, "msg": "invalid speed"}
             if cmd == "export_log":
                 path = arg or "/tmp/nbody_viz_export.jsonl"
                 self.field.export_log(path)
                 return {"ok": True, "msg": path, "ticks": len(self.field.log)}
-            return {"ok": False, "msg": f"unknown command {cmd!r}"}
+            return {"ok": False, "msg": "unknown command %r" % cmd}
 
 
 class VizHandler(BaseHTTPRequestHandler):
     session: VizSession = None
+    lab = None
 
     def log_message(self, fmt, *args):
         if "/api/" in (args[0] if args else ""):
@@ -349,13 +359,13 @@ class VizHandler(BaseHTTPRequestHandler):
                     self._json(200, {"ok": False, "msg": "out of range",
                                      "count": len(log)})
             return
+        if lab_http.handle_lab_get(self, path, parsed):
+            return
         self.send_error(404)
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/command":
-            self.send_error(404)
-            return
+        path = parsed.path
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -363,21 +373,27 @@ class VizHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._json(400, {"ok": False, "msg": "bad json"})
             return
-        result = self.session.command(data.get("cmd", ""), data.get("arg"))
-        self._json(200, result)
+        if path == "/api/command":
+            result = self.session.command(data.get("cmd", ""), data.get("arg"))
+            self._json(200, result)
+            return
+        if lab_http.handle_lab_post(self, path, data):
+            return
+        self.send_error(404)
 
 
 def run_server(scenario: str = "1", port: int = DEFAULT_PORT, open_browser: bool = True):
     session = VizSession(scenario)
     VizHandler.session = session
+    VizHandler.lab = Lab.LabStore()
     t = threading.Thread(target=session.tick_loop, daemon=True)
     t.start()
     server = ThreadingHTTPServer(("127.0.0.1", port), VizHandler)
-    url = f"http://127.0.0.1:{port}/"
-    print(f"MetaField N-Body \u00b7 Celestial Field Observatory")
-    print(f"  scenario : {session.field.name}")
-    print(f"  URL      : {url}")
-    print(f"  Ctrl-C to stop")
+    url = "http://127.0.0.1:%d/" % port
+    print("MetaField N-Body · Celestial Field Observatory")
+    print("  scenario :", session.field.name)
+    print("  URL      :", url)
+    print("  Ctrl-C to stop")
     if open_browser:
         try:
             webbrowser.open(url)
@@ -394,13 +410,11 @@ def run_server(scenario: str = "1", port: int = DEFAULT_PORT, open_browser: bool
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="metafield_nbody viz",
-        description="Launch the Celestial Field Observatory (local 3D scientific visualizer).",
+        description="Launch the Celestial Field Observatory.",
     )
-    ap.add_argument("--scenario", "-s", default="1",
-                    help="scenario key or name (default: figure-8)")
+    ap.add_argument("--scenario", "-s", default="1")
     ap.add_argument("--port", "-p", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--no-browser", action="store_true",
-                    help="do not open a browser window")
+    ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args(argv)
     run_server(args.scenario, args.port, open_browser=not args.no_browser)
     return 0
