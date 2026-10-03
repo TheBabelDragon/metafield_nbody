@@ -20,6 +20,8 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 DEFAULT_PORT = 8765
 HISTORY_CAP = 4000
 TRAIL_CAP = 1500
+PERM_TRAIL_CAP = 8000
+PERM_TRAIL_STRIDE = 2
 
 
 class VizSession:
@@ -32,7 +34,32 @@ class VizSession:
         self.speed = 1.0
         self._last_step = time.monotonic()
         self.history: list[dict] = []
+        self.permanent_trails: list[list] = [[] for _ in self.field.m]
+        self._perm_stride_counter = 0
         self._record_snapshot()
+
+    def _clear_permanent_trails(self):
+        n = len(self.field.m)
+        self.permanent_trails = [[] for _ in range(n)]
+        self._perm_stride_counter = 0
+
+    def _append_permanent(self, force: bool = False):
+        f = self.field
+        n = len(f.m)
+        if len(self.permanent_trails) != n:
+            self.permanent_trails = [[] for _ in range(n)]
+        self._perm_stride_counter += 1
+        if not force and (self._perm_stride_counter % PERM_TRAIL_STRIDE) != 0:
+            return
+        for i in range(n):
+            self.permanent_trails[i].append({
+                "x": list(f.x[i]),
+                "v": list(f.v[i]),
+                "t": f.t,
+                "tick": f.tick_no,
+            })
+            if len(self.permanent_trails[i]) > PERM_TRAIL_CAP:
+                self.permanent_trails[i] = self.permanent_trails[i][-PERM_TRAIL_CAP:]
 
     def _record_snapshot(self):
         f = self.field
@@ -56,6 +83,7 @@ class VizSession:
         self.history.append(snap)
         if len(self.history) > HISTORY_CAP:
             self.history = self.history[-HISTORY_CAP:]
+        self._append_permanent(force=(f.tick_no == 0))
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -100,6 +128,16 @@ class VizSession:
                     for i in range(len(f.m))
                 ],
                 "trails": trails,
+                "permanent_trails": [
+                    [{"x": s["x"], "v": s["v"], "t": s["t"], "tick": s["tick"]}
+                     for s in body_trail]
+                    for body_trail in self.permanent_trails
+                ],
+                "permanent_trail_meta": {
+                    "cap": PERM_TRAIL_CAP,
+                    "stride": PERM_TRAIL_STRIDE,
+                    "points": sum(len(t) for t in self.permanent_trails),
+                },
                 "invariants": {
                     "energy": inv["energy"], "kinetic": inv["kinetic"],
                     "potential": inv["potential"],
@@ -203,6 +241,7 @@ class VizSession:
             if cmd == "reset":
                 self.field.command("reset")
                 self.history = []
+                self._clear_permanent_trails()
                 self._record_snapshot()
                 self.playing = False
                 return {"ok": True, "msg": "reset"}
@@ -210,9 +249,14 @@ class VizSession:
                 ok, msg = self.field.select(arg)
                 if ok:
                     self.history = []
+                    self._clear_permanent_trails()
                     self._record_snapshot()
                     self.playing = False
                 return {"ok": ok, "msg": msg}
+            if cmd == "clear_permanent_trails":
+                self._clear_permanent_trails()
+                self._append_permanent(force=True)
+                return {"ok": True, "msg": "permanent trails cleared"}
             if cmd == "speed":
                 try:
                     sp = float(arg)
