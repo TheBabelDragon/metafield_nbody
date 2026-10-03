@@ -173,8 +173,10 @@
     <div class="panel" id="panel-scene">
       <section>
         <h3>Display</h3>
-        <label><input type="checkbox" id="tog-trails" checked/> Trails</label>
-        <label><input type="checkbox" id="tog-vel" checked/> Velocity vectors</label>
+        <label><input type="checkbox" id="tog-trails" checked/> Ephemeral trails</label>
+        <label><input type="checkbox" id="tog-perm-trails" checked/> Permanent trails</label>
+        <label><input type="checkbox" id="tog-trail-vecs" checked/> Trail vectors</label>
+        <label><input type="checkbox" id="tog-vel" checked/> Live velocity vectors</label>
         <label><input type="checkbox" id="tog-acc"/> Acceleration vectors</label>
         <label><input type="checkbox" id="tog-labels" checked/> Body labels</label>
         <label><input type="checkbox" id="tog-grid" checked/> Grid / orbital plane</label>
@@ -184,9 +186,15 @@
         <label><input type="checkbox" id="tog-cinematic"/> Cinematic mode</label>
       </section>
       <section>
-        <h3>Trail length</h3>
+        <h3>Ephemeral trail length</h3>
         <input type="range" id="trail-len" min="50" max="1500" value="600"/>
         <span id="trail-len-val" class="mono">600</span>
+      </section>
+      <section>
+        <h3>Trail vector spacing</h3>
+        <input type="range" id="trail-vec-stride" min="1" max="40" value="8"/>
+        <span id="trail-vec-stride-val" class="mono">8</span>
+        <p class="note">Sample every N permanent-trail points for direction arrows.</p>
       </section>
       <section>
         <h3>Vector scale</h3>
@@ -197,6 +205,11 @@
         <h3>Body scale (visual only)</h3>
         <input type="range" id="body-scale" min="1" max="50" value="12"/>
         <span id="body-scale-val" class="mono">12</span>
+      </section>
+      <section>
+        <h3>Permanent trails</h3>
+        <button id="btn-clear-perm">Clear permanent trails</button>
+        <p class="note">Accumulate until reset / scenario change. Display history only — not a force field.</p>
       </section>
       <section>
         <h3>Camera</h3>
