@@ -6,8 +6,62 @@ symplectic integration, FieldTick provenance, golden-pinned operators, a local
 
 ## Install & run
 
+Requires **Python 3.10+**. No third-party packages are required for the core
+Field, CLI, lab, or doctor diagnostics. The observatory UI loads Three.js from a CDN.
+
+### Externally managed environments (Arch Linux, Debian/Ubuntu, Fedora, …)
+
+System Python is often marked *externally managed* (PEP 668). Do **not** run
+`pip install` against the system interpreter. Use a virtual environment:
+
+**Arch Linux**
+
 ```bash
+# optional if missing: sudo pacman -S python python-virtualenv
+git clone https://github.com/TheBabelDragon/metafield_nbody
+cd metafield_nbody
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
 pip install -e .
+```
+
+**Debian / Ubuntu**
+
+```bash
+sudo apt install python3 python3-venv python3-pip   # once
+git clone https://github.com/TheBabelDragon/metafield_nbody
+cd metafield_nbody
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+**Any platform (same pattern)**
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+If `python -m venv` fails with `ensurepip is not available`, install the distro
+venv package (`python-virtualenv` on Arch, `python3-venv` on Debian/Ubuntu) and
+retry. Avoid `--break-system-packages` unless you accept the risk.
+
+### Run without installing (optional)
+
+From the repo root, with the package directory on `PYTHONPATH`:
+
+```bash
+cd metafield_nbody   # repo root
+PYTHONPATH=. python -m metafield_nbody doctor
+PYTHONPATH=. python -m metafield_nbody viz --scenario figure-8
+```
+
+### Run
+
+```bash
 python -m metafield_nbody doctor
 python -m metafield_nbody --list
 python -m metafield_nbody --scenario figure-8 --ticks 300
@@ -56,6 +110,7 @@ Browser (Three.js) — render coordinates = payload coordinates
 ## Verification
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate   # see Install if needed
 pip install -e .
 python -m metafield_nbody doctor
 python -m unittest discover -s tests -v
