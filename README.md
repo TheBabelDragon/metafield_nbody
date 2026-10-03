@@ -1,15 +1,70 @@
 # metafield_nbody — gravitational N-body Field for MetaField / field-os
 
-Deterministic, schema-compliant Newtonian N-body simulation with Forest-Ruth 4 symplectic integration, FieldTick provenance, golden-pinned operators, and a local 3D Celestial Field Observatory with an Interactive Dynamics Laboratory.
+Deterministic, schema-compliant Newtonian N-body simulation with Forest-Ruth 4
+symplectic integration, FieldTick provenance, golden-pinned operators, a local
+3D Celestial Field Observatory, and an Interactive Dynamics Laboratory.
 
 ## Install & run
 
 ```bash
 pip install -e .
+python -m metafield_nbody doctor
 python -m metafield_nbody --list
 python -m metafield_nbody --scenario figure-8 --ticks 300
 python -m metafield_nbody viz --scenario figure-8
 ```
+
+## Scientific Integrity
+
+Authoritative simulation state lives in `NBodyField`. The visualization and lab
+layers **display** or **copy** that state; they do not invent positions, energies,
+or FieldTicks.
+
+```
+Physics (physics.py)
+  ↓
+NBodyField  ──emit──► FieldTick (hashed, schema-validated)
+  ↓                      ↓
+VizSession            export JSONL
+  ↓                      ↓
+HTTP /api/state       load_log → replay
+  ↓
+Browser (Three.js) — render coordinates = payload coordinates
+```
+
+### What is guaranteed
+
+* **Deterministic Field runs** on a given platform: same scenario + same advance
+  count → bit-identical state and digest chain (IEEE-754 `+ - * / sqrt` only in
+  the primary operator).
+* **FieldTick chain integrity**: digests hash-chain; tampering fails `check_log` / `replay`.
+* **Transport fidelity**: `/api/state` body positions/velocities/time/tick/digest
+  match the live `NBodyField` (no unit conversion, no axis swap).
+* **Softened Newtonian model**: potential energy uses the same Plummer softening
+  (`ε²`) as the force law (G = 1 normalized units).
+* **Lab experiments**: fixed-step integrators with versioned manifests
+  (`config_digest`, `run_digest`, parent lineage). Isolated from FieldTick emission.
+
+### What is not claimed
+
+* Visualization FPS is not a physics timestep.
+* Energy conservation monitoring is **not** a complete proof of trajectory accuracy.
+* Trajectory separation tools are **numerical comparisons**, not Lyapunov proofs.
+* Adaptive-dt Forest-Ruth is not strictly symplectic; close encounters increase drift.
+* Exact cross-platform bitwise identity is not promised beyond IEEE-754 assumptions.
+
+## Verification
+
+```bash
+pip install -e .
+python -m metafield_nbody doctor
+python -m unittest discover -s tests -v
+python -m metafield_nbody --scenario figure-8 --ticks 100
+python -m metafield_nbody viz --scenario figure-8 --no-browser
+```
+
+Integrity tests (`tests/test_integrity.py`) independently recompute K, U, E, P, L;
+verify Field→snapshot correspondence; verify export/replay; reject corrupted logs.
 
 ## Celestial Field Observatory
 
@@ -17,104 +72,32 @@ python -m metafield_nbody viz --scenario figure-8
 python -m metafield_nbody viz [--scenario figure-8] [--port 8765]
 ```
 
-Opens a local browser UI driven by the live `NBodyField` (authoritative). Features:
-
-* 3D scene (Three.js): bodies, ephemeral + permanent trails, trail vectors, velocity/acceleration arrows
-* Live telemetry matching Python state
-* Mathematical inspector (equations, Forest-Ruth notes, softening)
-* FieldTick provenance inspector
-* Conservation plots from recorded history
-* Scenario select / reset / export JSONL
+3D scene driven by the live `NBodyField` (authoritative): trails, vectors,
+telemetry, mathematical inspector, FieldTick provenance, conservation plots.
 
 ## Interactive Dynamics Laboratory
 
-Isolated fixed-step numerical experiments for integrator comparison, energy-drift
-analysis, and parameter sweeps. Lab runs do **not** mutate the live `NBodyField`
-or emit FieldTicks. The golden-pinned Forest-Ruth operator remains the Field baseline.
-
-### Python API
+Isolated fixed-step experiments (integrator comparison, energy-drift analysis,
+parameter sweeps). Lab runs do **not** mutate the live Field or emit FieldTicks.
 
 ```python
-from metafield_nbody import experiment as E
-from metafield_nbody import lab as Lab
-from metafield_nbody.integrators import list_integrators
-
-ic = E.bodies_from_scenario("figure-8")          # template (copy)
+from metafield_nbody import experiment as E, lab as Lab
+ic = E.bodies_from_scenario("figure-8")
 cfg = E.build_config(ic=ic, integrator_id="rk4", dt=1e-3, n_steps=1000)
 result = Lab.run_experiment(cfg)
 print(result["energy_analysis"]["rel_drift"])
-
-# Derive a variant without mutating the parent
-child = E.derive_config(cfg, {"dt": 5e-4}, label="half-dt")
-r2 = Lab.run_experiment(child)
-print(E.diff_configs(cfg, child))
 ```
 
-### Integrators (lab only)
+Lab integrators: `forest_ruth4_fixed`, `velocity_verlet`, `rk4`,
+`semi_implicit_euler`, `explicit_euler`.
 
-| id | order | symplectic | notes |
-|---|---|---|---|
-| `forest_ruth4_fixed` | 4 | yes | Same composition as Field operator; fixed dt |
-| `velocity_verlet` | 2 | yes | Stormer-Verlet |
-| `rk4` | 4 | no | Classical RK4; secular energy drift |
-| `semi_implicit_euler` | 1 | yes | Euler-Cromer |
-| `explicit_euler` | 1 | no | Pedagogic only |
+## Contract & formal checks
 
-### Observatory UI
-
-Open the **Lab** tab:
-
-1. Choose scenario template + integrator + dt + steps → **Run**.
-2. Inspect energy drift plot and metrics (E0, relative drift, max/mean |dE|).
-3. **Sweep dt** runs a background job over `{1e-3, 2e-3, 5e-3}`.
-4. **Compare last two** shows pairwise config differences and drift summary.
-
-HTTP API: `/api/lab/run`, `/api/lab/derive`, `/api/lab/compare`,
-`/api/lab/sweep`, `/api/lab/experiments`, `/api/lab/integrators`.
-
-### Reproducibility
-
-Each experiment stores a versioned manifest (`manifest_version`, `config_digest`,
-`run_digest`, parent lineage, software provenance). Identical configs on the same
-platform yield identical `run_digest` values for lab integrators.
-
-### Numerical limitations
-
-* Lab integrators use fixed step size; adaptive control remains Field-only.
-* Energy conservation is not a complete measure of trajectory accuracy.
-* Trajectory separation tools are **numerical comparisons**, not verified Lyapunov exponents.
-* Resource limits: max 32 bodies, 5e5 steps, duration <= 1000, <= 64 sweep samples.
-* Invalid IC (non-positive mass, near-coincident bodies, non-finite values) are rejected — never silently repaired.
-
-### Tests
-
-```
-python -m unittest tests.test_lab -v
-python -m unittest discover -s tests
-```
-
-## Contract
-
-`schemas/*.json` are v0.1 schemas shaped from the field-os README
-(Observation → FieldDelta → FieldTick, provenance, synthetic ≠ physical).
-All wire names live in `contract.py`. Reconcile with the real ones with:
-
-```
-python -m metafield_nbody.checker --schema-dir ../field-os/schema
-```
-
-## Formal checks
-
-`python -m metafield_nbody.checker` (or `python -m unittest discover -s tests`):
-
-* **Operator lock** — `operators.lock.json` pins operator version + source hash.
-* **Goldens** — bit-exact recompute of 300 ticks per scenario.
-* **Duck checker** — independent integrator audits logs.
-* **Behavioural laws B1–B11** and figure-8 numerical laws N0–N4.
+Operator lock, goldens, duck checker, behavioural laws B1–B11, figure-8 numerical
+laws. See `python -m metafield_nbody.checker`.
 
 ## Known limits (measured, not hidden)
 
 * Figure-8 return error is bounded by the 8-digit published ICs (~1.6e-8).
 * Adaptive dt is not strictly symplectic.
-* Bitwise determinism relies on IEEE-754 `+ - * / sqrt` only in the primary operator.
-* Pure Python: ~10^4 ticks/s-scale; not for long runs.
+* Pure Python: ~10^4 ticks/s-scale; not for long production runs.
