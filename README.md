@@ -6,7 +6,86 @@ Newtonian gravity (G=1, softening 1e-6), 4th-order symplectic Forest-Ruth
 Stdlib only, Python >= 3.8. Drop the package + `.babel/` into the
 metafield-engine tree (or run in place).
 
-## Run
+## Celestial Field Observatory (visualization)
+
+Interactive 3D scientific visualization of the live `NBodyField`. The Python
+simulation remains the single source of truth; the browser is a presentation
+and instrumentation layer.
+
+```
+python -m metafield_nbody viz
+python -m metafield_nbody viz --scenario figure-8
+python -m metafield_nbody viz --scenario burrau --port 8765
+python -m metafield_nbody viz --no-browser
+```
+
+Opens `http://127.0.0.1:8765/` (stdlib HTTP server, no extra dependencies).
+Three.js is loaded from CDN in the browser.
+
+### Architecture
+
+```
+NBodyField  →  VizSession (history + control)  →  HTTP/JSON API
+                                                      ↓
+                                              Browser (Three.js)
+                                         3D scene · telemetry · math · Field
+```
+
+- **3D scene** — mass-scaled luminous bodies, orbital trails, velocity /
+  acceleration vectors, COM marker, grid, axes, orbit/pan/zoom, bloom,
+  cinematic mode.
+- **Mathematics inspector** — equations of motion as implemented (softened
+  Newtonian force), Forest-Ruth update structure, parameters (G, ε, η, θ,
+  dt bounds), known numerical limits.
+- **Invariants** — energy, kinetic, potential, relative drift, linear & angular
+  momentum, centre of mass; live values + history plots.
+- **Field inspector** — digest chain, prev_digest, tick payload viewer,
+  operator provenance, contract admission status, JSONL export.
+- **Scenario laboratory** — all ten built-in scenarios; select / reset /
+  frame camera.
+
+Visual body sizes and vector lengths are display-only and do not affect
+physics. Interpolated display frames are never fed back into the integrator.
+
+### Controls
+
+| UI | Action |
+|---|---|
+| ▶ / ⏸ | Play / pause |
+| ⏭ | Single step |
+| ↺ | Reset to genesis |
+| Scenario menu | Load any scenario (resets run) |
+| Speed slider | Target ticks per wall-second |
+| Scene panel | Toggle trails, vectors, labels, grid, COM, axes, bloom, cinematic |
+| Body click | Select body → mass / x / v / a + pairwise table |
+
+### Mathematical model (as implemented)
+
+```
+dr_i / dt = v_i
+dv_i / dt = G Σ_{j≠i} m_j (r_j − r_i) / (|r_j − r_i|² + ε²)^{3/2}
+
+E = Σ ½ m_i |v_i|² − Σ_{i<j} G m_i m_j / √(|r_i − r_j|² + ε²)
+P = Σ m_i v_i
+L = Σ m_i (r_i × v_i)
+```
+
+G = 1, Plummer softening ε = 1e-6. Integrator: Forest-Ruth 4th-order
+(three leapfrogs). Adaptive `dt = η · min(free-fall, fly-by)` — **not**
+strictly symplectic; close encounters increase energy drift (see Known limits).
+
+This visualization is a MetaField Field *consumer and inspector*, not a
+standalone orbital toy: every displayed tick was admitted by the contract
+layer and hash-chained.
+
+### Tests
+
+```
+python -m unittest tests.test_viz -v
+python -m unittest discover -s tests
+```
+
+## Run (CLI)
 
 ```
 python -m metafield_nbody --list
