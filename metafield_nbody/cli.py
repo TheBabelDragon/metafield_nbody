@@ -1,6 +1,8 @@
 """Run scenarios.  Interactive keys (stdin) or scripted:
    python -m metafield_nbody --scenario figure-8 --until 2.1 --log out.jsonl
    python -m metafield_nbody --script "1 s s p s r q"
+   python -m metafield_nbody doctor
+   python -m metafield_nbody viz
 Keys: 1-9,0 select | s | s:N  step 1 / N ticks | p toggle pause | r reset | i invariants | q quit
 """
 import argparse
@@ -42,10 +44,12 @@ def _exec(f, toks):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    # Subcommand: viz → Celestial Field Observatory
     if argv and argv[0] == "viz":
         from .viz import main as viz_main
         return viz_main(argv[1:])
+    if argv and argv[0] == "doctor":
+        from .doctor import main as doctor_main
+        return doctor_main(argv[1:])
 
     ap = argparse.ArgumentParser(prog="metafield_nbody", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -66,7 +70,7 @@ def main(argv=None):
     elif a.until is not None or a.ticks is not None:
         f.run_until(a.until) if a.until is not None else f.advance(a.ticks)
         print(_status(f))
-    else:                                        # interactive
+    else:
         print(__doc__); print(_status(f))
         for line in sys.stdin:
             _exec(f, line.split())
