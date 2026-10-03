@@ -1,1 +1,282 @@
-"""Experiment manifests, initial-condition validation, and lineage.\n\nLab experiments are separate from NBodyField FieldTick emission. Each run\nrecords a versioned manifest so results can be inspected, compared, and\nreproduced without mutating historical provenance.\n"""\nfrom __future__ import annotations\n\nimport copy\nimport hashlib\nimport json\nimport time\nimport uuid\nfrom typing import Any, Dict, List, Optional\n\nfrom . import physics as P\nfrom . import scenarios as S\nfrom .integrators import INTEGRATORS\n\nMANIFEST_VERSION = \"1.0.0\"\n\nMAX_BODIES = 32\nMAX_STEPS = 500_000\nMAX_DURATION = 1000.0\nMIN_DT = 1e-9\nMAX_DT = 1.0\nMAX_MASS = 1e12\nMAX_COORD = 1e6\nMAX_SWEEP_SAMPLES = 64\n\n\nclass ValidationError(ValueError):\n    \"\"\"Invalid experimental configuration — never silently repaired.\"\"\"\n\n\ndef _finite(x) -> bool:\n    try:\n        return x == x and abs(x) != float(\"inf\")\n    except Exception:\n        return False\n\n\ndef validate_bodies(m, x, v) -> None:\n    if not isinstance(m, (list, tuple)) or not m:\n        raise ValidationError(\"at least one body required\")\n    n = len(m)\n    if n > MAX_BODIES:\n        raise ValidationError(\"at most %d bodies allowed (got %d)\" % (MAX_BODIES, n))\n    if len(x) != n or len(v) != n:\n        raise ValidationError(\"m, x, v length mismatch\")\n    for i in range(n):\n        if not _finite(m[i]) or m[i] <= 0:\n            raise ValidationError(\"body %d: mass must be finite and > 0 (got %r)\" % (i, m[i]))\n        if m[i] > MAX_MASS:\n            raise ValidationError(\"body %d: mass exceeds MAX_MASS=%g\" % (i, MAX_MASS))\n        if len(x[i]) != 3 or len(v[i]) != 3:\n            raise ValidationError(\"body %d: position/velocity must be 3-vectors\" % i)\n        for c, label in enumerate(\"xyz\"):\n            if not _finite(x[i][c]) or abs(x[i][c]) > MAX_COORD:\n                raise ValidationError(\n                    \"body %d: position %s invalid or out of range\" % (i, label)\n                )\n            if not _finite(v[i][c]) or abs(v[i][c]) > MAX_COORD:\n                raise ValidationError(\n                    \"body %d: velocity %s invalid or out of range\" % (i, label)\n                )\n    for i in range(n - 1):\n        for j in range(i + 1, n):\n            dx = x[i][0] - x[j][0]\n            dy = x[i][1] - x[j][1]\n            dz = x[i][2] - x[j][2]\n            r2 = dx * dx + dy * dy + dz * dz\n            if r2 < P.EPS2 * 0.25:\n                raise ValidationError(\n                    \"bodies %d and %d are nearly coincident (singular configuration)\"\n                    % (i, j)\n                )\n\n\ndef validate_run_params(dt, n_steps=None, duration=None, integrator_id=None) -> None:\n    if not _finite(dt) or dt <= 0:\n        raise ValidationError(\"dt must be finite and > 0\")\n    if dt < MIN_DT or dt > MAX_DT:\n        raise ValidationError(\"dt must be in [%g, %g]\" % (MIN_DT, MAX_DT))\n    if integrator_id is not None and integrator_id not in INTEGRATORS:\n        raise ValidationError(\"unknown integrator %r\" % integrator_id)\n    if n_steps is not None:\n        if not isinstance(n_steps, int) or n_steps < 1:\n            raise ValidationError(\"n_steps must be a positive integer\")\n        if n_steps > MAX_STEPS:\n            raise ValidationError(\"n_steps exceeds MAX_STEPS=%d\" % MAX_STEPS)\n    if duration is not None:\n        if not _finite(duration) or duration <= 0:\n            raise ValidationError(\"duration must be finite and > 0\")\n        if duration > MAX_DURATION:\n            raise ValidationError(\"duration exceeds MAX_DURATION=%g\" % MAX_DURATION)\n\n\ndef bodies_from_scenario(sel) -> Dict[str, Any]:\n    try:\n        built = S.build(sel)\n    except KeyError as exc:\n        raise ValidationError(\"unknown scenario %r\" % sel) from exc\n    return {\n        \"source\": \"scenario\",\n        \"scenario_key\": built[\"key\"],\n        \"scenario_name\": built[\"name\"],\n        \"m\": built[\"m\"],\n        \"x\": built[\"x\"],\n        \"v\": built[\"v\"],\n        \"note\": built[\"note\"],\n        \"experimental\": False,\n    }\n\n\ndef make_custom_ic(m, x, v, name: str = \"custom\") -> Dict[str, Any]:\n    m = [float(mi) for mi in m]\n    x = [[float(c) for c in p] for p in x]\n    v = [[float(c) for c in q] for q in v]\n    validate_bodies(m, x, v)\n    return {\n        \"source\": \"custom\",\n        \"scenario_key\": None,\n        \"scenario_name\": name,\n        \"m\": m,\n        \"x\": x,\n        \"v\": v,\n        \"note\": \"user-defined experimental initial conditions\",\n        \"experimental\": True,\n    }\n\n\ndef _canonical(obj) -> str:\n    return json.dumps(obj, sort_keys=True, separators=(\",\", \":\"), allow_nan=False)\n\n\ndef config_digest(config: Dict[str, Any]) -> str:\n    return hashlib.sha256(_canonical(config).encode(\"utf-8\")).hexdigest()\n\n\ndef new_experiment_id() -> str:\n    return uuid.uuid4().hex[:12]\n\n\ndef build_config(\n    *,\n    ic: Dict[str, Any],\n    integrator_id: str = \"forest_ruth4_fixed\",\n    dt: float = 1e-3,\n    n_steps: Optional[int] = None,\n    duration: Optional[float] = None,\n    G: float = P.G,\n    softening: float = P.SOFTENING,\n    parent_id: Optional[str] = None,\n    changes: Optional[List[str]] = None,\n    label: str = \"\",\n    seed: Optional[int] = None,\n) -> Dict[str, Any]:\n    validate_bodies(ic[\"m\"], ic[\"x\"], ic[\"v\"])\n    validate_run_params(dt, n_steps=n_steps, duration=duration, integrator_id=integrator_id)\n    if n_steps is None and duration is None:\n        n_steps = 1000\n    if n_steps is None:\n        n_steps = max(1, int(duration / dt))\n    if n_steps > MAX_STEPS:\n        raise ValidationError(\"resolved n_steps=%d exceeds MAX_STEPS=%d\" % (n_steps, MAX_STEPS))\n    if not _finite(G) or G <= 0:\n        raise ValidationError(\"G must be finite and > 0\")\n    if not _finite(softening) or softening < 0:\n        raise ValidationError(\"softening must be finite and >= 0\")\n\n    cfg = {\n        \"manifest_version\": MANIFEST_VERSION,\n        \"experiment_id\": new_experiment_id(),\n        \"label\": label or (\"exp-%s\" % integrator_id),\n        \"created_unix\": time.time(),\n        \"parent_id\": parent_id,\n        \"changes_from_parent\": list(changes or []),\n        \"ic\": {\n            \"source\": ic.get(\"source\"),\n            \"scenario_key\": ic.get(\"scenario_key\"),\n            \"scenario_name\": ic.get(\"scenario_name\"),\n            \"experimental\": bool(ic.get(\"experimental\", True)),\n            \"m\": ic[\"m\"],\n            \"x\": ic[\"x\"],\n            \"v\": ic[\"v\"],\n            \"note\": ic.get(\"note\", \"\"),\n        },\n        \"model\": {\n            \"force\": \"softened_newtonian\",\n            \"G\": float(G),\n            \"softening\": float(softening),\n        },\n        \"integration\": {\n            \"method\": integrator_id,\n            \"method_name\": INTEGRATORS[integrator_id][\"name\"],\n            \"symplectic\": INTEGRATORS[integrator_id][\"symplectic\"],\n            \"order\": INTEGRATORS[integrator_id][\"order\"],\n            \"dt\": float(dt),\n            \"n_steps\": int(n_steps),\n            \"duration\": float(dt) * int(n_steps),\n            \"adaptive\": False,\n        },\n        \"seed\": seed,\n        \"software\": {\n            \"package\": \"metafield_nbody\",\n            \"physics_operator\": P.OPERATOR_NAME,\n            \"physics_operator_version\": P.OPERATOR_VERSION,\n            \"lab_module\": \"experiment\",\n            \"lab_manifest_version\": MANIFEST_VERSION,\n        },\n    }\n    cfg[\"config_digest\"] = config_digest(\n        {k: v for k, v in cfg.items() if k not in (\"experiment_id\", \"created_unix\", \"config_digest\")}\n    )\n    return cfg\n\n\ndef derive_config(parent: Dict[str, Any], changes: Dict[str, Any], label: str = \"\") -> Dict[str, Any]:\n    ic = copy.deepcopy(parent[\"ic\"])\n    integration = copy.deepcopy(parent[\"integration\"])\n    model = copy.deepcopy(parent[\"model\"])\n    change_notes = []\n\n    if \"integrator_id\" in changes:\n        integration[\"method\"] = changes[\"integrator_id\"]\n        change_notes.append(\"integrator → %s\" % changes[\"integrator_id\"])\n    if \"dt\" in changes:\n        integration[\"dt\"] = float(changes[\"dt\"])\n        change_notes.append(\"dt → %g\" % changes[\"dt\"])\n    if \"n_steps\" in changes:\n        integration[\"n_steps\"] = int(changes[\"n_steps\"])\n        change_notes.append(\"n_steps → %d\" % changes[\"n_steps\"])\n    if \"duration\" in changes and \"n_steps\" not in changes:\n        integration[\"n_steps\"] = max(1, int(float(changes[\"duration\"]) / integration[\"dt\"]))\n        change_notes.append(\"duration → %g\" % changes[\"duration\"])\n    if \"G\" in changes:\n        model[\"G\"] = float(changes[\"G\"])\n        change_notes.append(\"G → %g\" % changes[\"G\"])\n    if \"softening\" in changes:\n        model[\"softening\"] = float(changes[\"softening\"])\n        change_notes.append(\"softening → %g\" % changes[\"softening\"])\n    if \"ic\" in changes:\n        ic = changes[\"ic\"]\n        change_notes.append(\"initial conditions replaced\")\n    if \"m\" in changes or \"x\" in changes or \"v\" in changes:\n        m = changes.get(\"m\", ic[\"m\"])\n        x = changes.get(\"x\", ic[\"x\"])\n        v = changes.get(\"v\", ic[\"v\"])\n        ic = make_custom_ic(m, x, v, name=ic.get(\"scenario_name\", \"custom\"))\n        change_notes.append(\"IC vectors modified\")\n\n    return build_config(\n        ic=ic,\n        integrator_id=integration[\"method\"],\n        dt=integration[\"dt\"],\n        n_steps=integration[\"n_steps\"],\n        G=model[\"G\"],\n        softening=model[\"softening\"],\n        parent_id=parent[\"experiment_id\"],\n        changes=change_notes,\n        label=label or (\"derived-from-%s\" % parent[\"experiment_id\"]),\n        seed=parent.get(\"seed\"),\n    )\n\n\ndef diff_configs(a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:\n    diffs = []\n    for path, va, vb in (\n        (\"integration.method\", a[\"integration\"][\"method\"], b[\"integration\"][\"method\"]),\n        (\"integration.dt\", a[\"integration\"][\"dt\"], b[\"integration\"][\"dt\"]),\n        (\"integration.n_steps\", a[\"integration\"][\"n_steps\"], b[\"integration\"][\"n_steps\"]),\n        (\"model.G\", a[\"model\"][\"G\"], b[\"model\"][\"G\"]),\n        (\"model.softening\", a[\"model\"][\"softening\"], b[\"model\"][\"softening\"]),\n        (\"ic.source\", a[\"ic\"][\"source\"], b[\"ic\"][\"source\"]),\n        (\"ic.scenario_key\", a[\"ic\"].get(\"scenario_key\"), b[\"ic\"].get(\"scenario_key\")),\n    ):\n        if va != vb:\n            diffs.append(\"%s: %r → %r\" % (path, va, vb))\n    if a[\"ic\"][\"m\"] != b[\"ic\"][\"m\"] or a[\"ic\"][\"x\"] != b[\"ic\"][\"x\"] or a[\"ic\"][\"v\"] != b[\"ic\"][\"v\"]:\n        diffs.append(\"ic bodies: mass/position/velocity differ\")\n    return diffs\n
+"""Experiment manifests, initial-condition validation, and lineage.
+
+Lab experiments are separate from NBodyField FieldTick emission. Each run
+records a versioned manifest so results can be inspected, compared, and
+reproduced without mutating historical provenance.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
+from . import physics as P
+from . import scenarios as S
+from .integrators import INTEGRATORS
+
+MANIFEST_VERSION = "1.0.0"
+
+MAX_BODIES = 32
+MAX_STEPS = 500_000
+MAX_DURATION = 1000.0
+MIN_DT = 1e-9
+MAX_DT = 1.0
+MAX_MASS = 1e12
+MAX_COORD = 1e6
+MAX_SWEEP_SAMPLES = 64
+
+
+class ValidationError(ValueError):
+    """Invalid experimental configuration — never silently repaired."""
+
+
+def _finite(x) -> bool:
+    try:
+        return x == x and abs(x) != float("inf")
+    except Exception:
+        return False
+
+
+def validate_bodies(m, x, v) -> None:
+    if not isinstance(m, (list, tuple)) or not m:
+        raise ValidationError("at least one body required")
+    n = len(m)
+    if n > MAX_BODIES:
+        raise ValidationError("at most %d bodies allowed (got %d)" % (MAX_BODIES, n))
+    if len(x) != n or len(v) != n:
+        raise ValidationError("m, x, v length mismatch")
+    for i in range(n):
+        if not _finite(m[i]) or m[i] <= 0:
+            raise ValidationError("body %d: mass must be finite and > 0 (got %r)" % (i, m[i]))
+        if m[i] > MAX_MASS:
+            raise ValidationError("body %d: mass exceeds MAX_MASS=%g" % (i, MAX_MASS))
+        if len(x[i]) != 3 or len(v[i]) != 3:
+            raise ValidationError("body %d: position/velocity must be 3-vectors" % i)
+        for c, label in enumerate("xyz"):
+            if not _finite(x[i][c]) or abs(x[i][c]) > MAX_COORD:
+                raise ValidationError(
+                    "body %d: position %s invalid or out of range" % (i, label)
+                )
+            if not _finite(v[i][c]) or abs(v[i][c]) > MAX_COORD:
+                raise ValidationError(
+                    "body %d: velocity %s invalid or out of range" % (i, label)
+                )
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            dx = x[i][0] - x[j][0]
+            dy = x[i][1] - x[j][1]
+            dz = x[i][2] - x[j][2]
+            r2 = dx * dx + dy * dy + dz * dz
+            if r2 < P.EPS2 * 0.25:
+                raise ValidationError(
+                    "bodies %d and %d are nearly coincident (singular configuration)"
+                    % (i, j)
+                )
+
+
+def validate_run_params(dt, n_steps=None, duration=None, integrator_id=None) -> None:
+    if not _finite(dt) or dt <= 0:
+        raise ValidationError("dt must be finite and > 0")
+    if dt < MIN_DT or dt > MAX_DT:
+        raise ValidationError("dt must be in [%g, %g]" % (MIN_DT, MAX_DT))
+    if integrator_id is not None and integrator_id not in INTEGRATORS:
+        raise ValidationError("unknown integrator %r" % integrator_id)
+    if n_steps is not None:
+        if not isinstance(n_steps, int) or n_steps < 1:
+            raise ValidationError("n_steps must be a positive integer")
+        if n_steps > MAX_STEPS:
+            raise ValidationError("n_steps exceeds MAX_STEPS=%d" % MAX_STEPS)
+    if duration is not None:
+        if not _finite(duration) or duration <= 0:
+            raise ValidationError("duration must be finite and > 0")
+        if duration > MAX_DURATION:
+            raise ValidationError("duration exceeds MAX_DURATION=%g" % MAX_DURATION)
+
+
+def bodies_from_scenario(sel) -> Dict[str, Any]:
+    try:
+        built = S.build(sel)
+    except KeyError as exc:
+        raise ValidationError("unknown scenario %r" % sel) from exc
+    return {
+        "source": "scenario",
+        "scenario_key": built["key"],
+        "scenario_name": built["name"],
+        "m": built["m"],
+        "x": built["x"],
+        "v": built["v"],
+        "note": built["note"],
+        "experimental": False,
+    }
+
+
+def make_custom_ic(m, x, v, name: str = "custom") -> Dict[str, Any]:
+    m = [float(mi) for mi in m]
+    x = [[float(c) for c in p] for p in x]
+    v = [[float(c) for c in q] for q in v]
+    validate_bodies(m, x, v)
+    return {
+        "source": "custom",
+        "scenario_key": None,
+        "scenario_name": name,
+        "m": m,
+        "x": x,
+        "v": v,
+        "note": "user-defined experimental initial conditions",
+        "experimental": True,
+    }
+
+
+def _canonical(obj) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def config_digest(config: Dict[str, Any]) -> str:
+    return hashlib.sha256(_canonical(config).encode("utf-8")).hexdigest()
+
+
+def new_experiment_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def build_config(
+    *,
+    ic: Dict[str, Any],
+    integrator_id: str = "forest_ruth4_fixed",
+    dt: float = 1e-3,
+    n_steps: Optional[int] = None,
+    duration: Optional[float] = None,
+    G: float = P.G,
+    softening: float = P.SOFTENING,
+    parent_id: Optional[str] = None,
+    changes: Optional[List[str]] = None,
+    label: str = "",
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    validate_bodies(ic["m"], ic["x"], ic["v"])
+    validate_run_params(dt, n_steps=n_steps, duration=duration, integrator_id=integrator_id)
+    if n_steps is None and duration is None:
+        n_steps = 1000
+    if n_steps is None:
+        n_steps = max(1, int(duration / dt))
+    if n_steps > MAX_STEPS:
+        raise ValidationError("resolved n_steps=%d exceeds MAX_STEPS=%d" % (n_steps, MAX_STEPS))
+    if not _finite(G) or G <= 0:
+        raise ValidationError("G must be finite and > 0")
+    if not _finite(softening) or softening < 0:
+        raise ValidationError("softening must be finite and >= 0")
+
+    cfg = {
+        "manifest_version": MANIFEST_VERSION,
+        "experiment_id": new_experiment_id(),
+        "label": label or ("exp-%s" % integrator_id),
+        "created_unix": time.time(),
+        "parent_id": parent_id,
+        "changes_from_parent": list(changes or []),
+        "ic": {
+            "source": ic.get("source"),
+            "scenario_key": ic.get("scenario_key"),
+            "scenario_name": ic.get("scenario_name"),
+            "experimental": bool(ic.get("experimental", True)),
+            "m": ic["m"],
+            "x": ic["x"],
+            "v": ic["v"],
+            "note": ic.get("note", ""),
+        },
+        "model": {
+            "force": "softened_newtonian",
+            "G": float(G),
+            "softening": float(softening),
+        },
+        "integration": {
+            "method": integrator_id,
+            "method_name": INTEGRATORS[integrator_id]["name"],
+            "symplectic": INTEGRATORS[integrator_id]["symplectic"],
+            "order": INTEGRATORS[integrator_id]["order"],
+            "dt": float(dt),
+            "n_steps": int(n_steps),
+            "duration": float(dt) * int(n_steps),
+            "adaptive": False,
+        },
+        "seed": seed,
+        "software": {
+            "package": "metafield_nbody",
+            "physics_operator": P.OPERATOR_NAME,
+            "physics_operator_version": P.OPERATOR_VERSION,
+            "lab_module": "experiment",
+            "lab_manifest_version": MANIFEST_VERSION,
+        },
+    }
+    cfg["config_digest"] = config_digest(
+        {k: v for k, v in cfg.items() if k not in ("experiment_id", "created_unix", "config_digest")}
+    )
+    return cfg
+
+
+def derive_config(parent: Dict[str, Any], changes: Dict[str, Any], label: str = "") -> Dict[str, Any]:
+    ic = copy.deepcopy(parent["ic"])
+    integration = copy.deepcopy(parent["integration"])
+    model = copy.deepcopy(parent["model"])
+    change_notes = []
+
+    if "integrator_id" in changes:
+        integration["method"] = changes["integrator_id"]
+        change_notes.append("integrator -> %s" % changes["integrator_id"])
+    if "dt" in changes:
+        integration["dt"] = float(changes["dt"])
+        change_notes.append("dt -> %g" % changes["dt"])
+    if "n_steps" in changes:
+        integration["n_steps"] = int(changes["n_steps"])
+        change_notes.append("n_steps -> %d" % changes["n_steps"])
+    if "duration" in changes and "n_steps" not in changes:
+        integration["n_steps"] = max(1, int(float(changes["duration"]) / integration["dt"]))
+        change_notes.append("duration -> %g" % changes["duration"])
+    if "G" in changes:
+        model["G"] = float(changes["G"])
+        change_notes.append("G -> %g" % changes["G"])
+    if "softening" in changes:
+        model["softening"] = float(changes["softening"])
+        change_notes.append("softening -> %g" % changes["softening"])
+    if "ic" in changes:
+        ic = changes["ic"]
+        change_notes.append("initial conditions replaced")
+    if "m" in changes or "x" in changes or "v" in changes:
+        m = changes.get("m", ic["m"])
+        x = changes.get("x", ic["x"])
+        v = changes.get("v", ic["v"])
+        ic = make_custom_ic(m, x, v, name=ic.get("scenario_name", "custom"))
+        change_notes.append("IC vectors modified")
+
+    return build_config(
+        ic=ic,
+        integrator_id=integration["method"],
+        dt=integration["dt"],
+        n_steps=integration["n_steps"],
+        G=model["G"],
+        softening=model["softening"],
+        parent_id=parent["experiment_id"],
+        changes=change_notes,
+        label=label or ("derived-from-%s" % parent["experiment_id"]),
+        seed=parent.get("seed"),
+    )
+
+
+def diff_configs(a: Dict[str, Any], b: Dict[str, Any]) -> List[str]:
+    diffs = []
+    for path, va, vb in (
+        ("integration.method", a["integration"]["method"], b["integration"]["method"]),
+        ("integration.dt", a["integration"]["dt"], b["integration"]["dt"]),
+        ("integration.n_steps", a["integration"]["n_steps"], b["integration"]["n_steps"]),
+        ("model.G", a["model"]["G"], b["model"]["G"]),
+        ("model.softening", a["model"]["softening"], b["model"]["softening"]),
+        ("ic.source", a["ic"]["source"], b["ic"]["source"]),
+        ("ic.scenario_key", a["ic"].get("scenario_key"), b["ic"].get("scenario_key")),
+    ):
+        if va != vb:
+            diffs.append("%s: %r -> %r" % (path, va, vb))
+    if a["ic"]["m"] != b["ic"]["m"] or a["ic"]["x"] != b["ic"]["x"] or a["ic"]["v"] != b["ic"]["v"]:
+        diffs.append("ic bodies: mass/position/velocity differ")
+    return diffs
