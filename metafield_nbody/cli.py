@@ -41,6 +41,12 @@ def _exec(f, toks):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Subcommand: viz → Celestial Field Observatory
+    if argv and argv[0] == "viz":
+        from .viz import main as viz_main
+        return viz_main(argv[1:])
+
     ap = argparse.ArgumentParser(prog="metafield_nbody", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--scenario", default="1", help="1-9,0 or name")
