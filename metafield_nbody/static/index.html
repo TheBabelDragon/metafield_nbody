@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>MetaField N-Body · Celestial Field Observatory</title>
+<link rel="stylesheet" href="/static/style.css"/>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="viewport">
+    <canvas id="c"></canvas>
+    <div id="hud-overlay">
+      <div id="title-bar">
+        <span class="logo">METAFIELD</span>
+        <span class="sep">·</span>
+        <span id="scenario-label">—</span>
+        <span class="sep">·</span>
+        <span id="time-label" class="mono">t = 0</span>
+      </div>
+      <div id="body-tooltip" class="hidden"></div>
+    </div>
+    <div id="cinematic-badge" class="hidden">CINEMATIC</div>
+  </div>
+
+  <aside id="inspector">
+    <nav id="tabs">
+      <button data-tab="telemetry" class="active">Telemetry</button>
+      <button data-tab="math">Mathematics</button>
+      <button data-tab="field">Field</button>
+      <button data-tab="plots">Plots</button>
+      <button data-tab="scene">Scene</button>
+    </nav>
+
+    <div class="panel active" id="panel-telemetry">
+      <section>
+        <h3>Simulation</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Scenario</span><span class="v" id="t-scenario">—</span></div>
+          <div class="kv"><span class="k">Bodies</span><span class="v mono" id="t-bodies">—</span></div>
+          <div class="kv"><span class="k">Time</span><span class="v mono" id="t-time">—</span></div>
+          <div class="kv"><span class="k">Tick</span><span class="v mono" id="t-tick">—</span></div>
+          <div class="kv"><span class="k">State</span><span class="v" id="t-state">—</span></div>
+          <div class="kv"><span class="k">Speed</span><span class="v mono" id="t-speed">—</span></div>
+        </div>
+      </section>
+      <section>
+        <h3>Physics</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Energy</span><span class="v mono" id="t-energy">—</span></div>
+          <div class="kv"><span class="k">E₀</span><span class="v mono" id="t-e0">—</span></div>
+          <div class="kv"><span class="k">Drift (rel)</span><span class="v mono" id="t-drift">—</span></div>
+          <div class="kv"><span class="k">Kinetic</span><span class="v mono" id="t-ke">—</span></div>
+          <div class="kv"><span class="k">Potential</span><span class="v mono" id="t-pe">—</span></div>
+          <div class="kv"><span class="k">|P|</span><span class="v mono" id="t-pmag">—</span></div>
+          <div class="kv"><span class="k">|L|</span><span class="v mono" id="t-lmag">—</span></div>
+          <div class="kv"><span class="k">Mass</span><span class="v mono" id="t-mass">—</span></div>
+        </div>
+        <div class="kv"><span class="k">COM</span><span class="v mono small" id="t-com">—</span></div>
+      </section>
+      <section>
+        <h3>Bodies</h3>
+        <div id="body-table"></div>
+      </section>
+      <section>
+        <h3>Performance</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Render FPS</span><span class="v mono" id="t-fps">—</span></div>
+          <div class="kv"><span class="k">Poll Hz</span><span class="v mono" id="t-poll">—</span></div>
+          <div class="kv"><span class="k">Trail pts</span><span class="v mono" id="t-trail">—</span></div>
+          <div class="kv"><span class="k">Latency</span><span class="v mono" id="t-lat">—</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="panel" id="panel-math">
+      <section>
+        <h3>Equations of Motion</h3>
+        <div class="eq-block">
+          <div class="eq">d<strong>r</strong><sub>i</sub> / dt = <strong>v</strong><sub>i</sub></div>
+          <div class="eq">d<strong>v</strong><sub>i</sub> / dt = G Σ<sub>j≠i</sub> m<sub>j</sub> (<strong>r</strong><sub>j</sub>−<strong>r</strong><sub>i</sub>) / (|<strong>r</strong><sub>j</sub>−<strong>r</strong><sub>i</sub>|² + ε²)<sup>3/2</sup></div>
+        </div>
+        <p class="note" id="math-force-note">Newtonian gravity with Plummer softening. G = 1.</p>
+      </section>
+      <section>
+        <h3>Conserved Quantities</h3>
+        <div class="eq-block">
+          <div class="eq">E = Σ ½ m<sub>i</sub> |<strong>v</strong><sub>i</sub>|² − Σ<sub>i&lt;j</sub> G m<sub>i</sub> m<sub>j</sub> / √(|<strong>r</strong><sub>i</sub>−<strong>r</strong><sub>j</sub>|² + ε²)</div>
+          <div class="eq"><strong>P</strong> = Σ m<sub>i</sub> <strong>v</strong><sub>i</sub></div>
+          <div class="eq"><strong>L</strong> = Σ m<sub>i</sub> (<strong>r</strong><sub>i</sub> × <strong>v</strong><sub>i</sub>)</div>
+        </div>
+      </section>
+      <section>
+        <h3>Numerical Method</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Integrator</span><span class="v" id="m-integrator">Forest-Ruth 4</span></div>
+          <div class="kv"><span class="k">Order</span><span class="v">4 (symplectic)</span></div>
+          <div class="kv"><span class="k">θ</span><span class="v mono" id="m-theta">—</span></div>
+          <div class="kv"><span class="k">Softening ε</span><span class="v mono" id="m-soft">—</span></div>
+          <div class="kv"><span class="k">η (dt)</span><span class="v mono" id="m-eta">—</span></div>
+          <div class="kv"><span class="k">dt range</span><span class="v mono" id="m-dtrange">—</span></div>
+        </div>
+        <p class="note">Forest-Ruth = three leapfrogs with weights (θ, 1−2θ, θ). Adaptive dt is not strictly symplectic; close encounters increase energy drift.</p>
+        <ul class="notes" id="math-notes"></ul>
+      </section>
+      <section>
+        <h3>Selected Body</h3>
+        <div id="sel-body-info" class="mono small">Click a body in the scene</div>
+      </section>
+      <section>
+        <h3>Pairwise Interactions</h3>
+        <div id="pair-table" class="mono small"></div>
+      </section>
+    </div>
+
+    <div class="panel" id="panel-field">
+      <section>
+        <h3>FieldTick Chain</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Digest</span><span class="v mono tiny" id="f-digest">—</span></div>
+          <div class="kv"><span class="k">Prev</span><span class="v mono tiny" id="f-prev">—</span></div>
+          <div class="kv"><span class="k">Ticks in log</span><span class="v mono" id="f-count">—</span></div>
+          <div class="kv"><span class="k">Last Δt</span><span class="v mono" id="f-dt">—</span></div>
+          <div class="kv"><span class="k">Contract</span><span class="v" id="f-contract">—</span></div>
+          <div class="kv"><span class="k">Operator</span><span class="v mono" id="f-op">—</span></div>
+        </div>
+      </section>
+      <section>
+        <h3>Provenance</h3>
+        <div class="kv"><span class="k">Origin</span><span class="v">synthetic · physical = false</span></div>
+        <div class="kv"><span class="k">Source</span><span class="v">metafield-nbody</span></div>
+        <p class="note">Every emitted tick is schema-validated and hash-chained before admission. The visualizer never invents FieldTicks.</p>
+      </section>
+      <section>
+        <h3>Inspect Tick</h3>
+        <div class="row">
+          <input type="number" id="tick-idx" min="0" value="0" class="mono"/>
+          <button id="btn-load-tick">Load</button>
+        </div>
+        <pre id="tick-payload" class="mono small">—</pre>
+      </section>
+      <section>
+        <h3>Export</h3>
+        <button id="btn-export">Export JSONL log</button>
+        <span id="export-status" class="note"></span>
+      </section>
+    </div>
+
+    <div class="panel" id="panel-plots">
+      <section>
+        <h3>Energy</h3>
+        <canvas id="plot-energy" width="360" height="120"></canvas>
+      </section>
+      <section>
+        <h3>Relative Energy Drift</h3>
+        <canvas id="plot-drift" width="360" height="120"></canvas>
+      </section>
+      <section>
+        <h3>|P| and |L|</h3>
+        <canvas id="plot-mom" width="360" height="120"></canvas>
+      </section>
+      <p class="note">Plots use recorded simulation history, not interpolated display frames.</p>
+    </div>
+
+    <div class="panel" id="panel-scene">
+      <section>
+        <h3>Display</h3>
+        <label><input type="checkbox" id="tog-trails" checked/> Trails</label>
+        <label><input type="checkbox" id="tog-vel" checked/> Velocity vectors</label>
+        <label><input type="checkbox" id="tog-acc"/> Acceleration vectors</label>
+        <label><input type="checkbox" id="tog-labels" checked/> Body labels</label>
+        <label><input type="checkbox" id="tog-grid" checked/> Grid / orbital plane</label>
+        <label><input type="checkbox" id="tog-com" checked/> Center of mass</label>
+        <label><input type="checkbox" id="tog-axes" checked/> Reference axes</label>
+        <label><input type="checkbox" id="tog-bloom" checked/> Bloom</label>
+        <label><input type="checkbox" id="tog-cinematic"/> Cinematic mode</label>
+      </section>
+      <section>
+        <h3>Trail length</h3>
+        <input type="range" id="trail-len" min="50" max="1500" value="600"/>
+        <span id="trail-len-val" class="mono">600</span>
+      </section>
+      <section>
+        <h3>Vector scale</h3>
+        <input type="range" id="vec-scale" min="1" max="100" value="20"/>
+        <span id="vec-scale-val" class="mono">20</span>
+      </section>
+      <section>
+        <h3>Body scale (visual only)</h3>
+        <input type="range" id="body-scale" min="1" max="50" value="12"/>
+        <span id="body-scale-val" class="mono">12</span>
+      </section>
+      <section>
+        <h3>Camera</h3>
+        <button id="btn-frame">Frame all</button>
+        <button id="btn-top">Top view</button>
+        <button id="btn-side">Side view</button>
+      </section>
+    </div>
+  </aside>
+
+  <footer id="controls">
+    <div class="ctrl-group">
+      <button id="btn-play" title="Play / Pause">▶</button>
+      <button id="btn-step" title="Single step">⏭</button>
+      <button id="btn-reset" title="Reset">↺</button>
+    </div>
+    <div class="ctrl-group">
+      <label>Scenario
+        <select id="sel-scenario"></select>
+      </label>
+    </div>
+    <div class="ctrl-group">
+      <label>Speed
+        <input type="range" id="speed" min="0.5" max="60" step="0.5" value="8"/>
+        <span id="speed-val" class="mono">8</span>
+      </label>
+    </div>
+    <div class="ctrl-group status" id="conn-status">connecting…</div>
+  </footer>
+</div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
