@@ -38,6 +38,7 @@
       <button data-tab="field">Field</button>
       <button data-tab="plots">Plots</button>
       <button data-tab="scene">Scene</button>
+      <button data-tab="lab">Lab</button>
     </nav>
 
     <div class="panel active" id="panel-telemetry">
@@ -93,7 +94,7 @@
       <section>
         <h3>Conserved Quantities</h3>
         <div class="eq-block">
-          <div class="eq">E = Σ ½ m<sub>i</sub> |<strong>v</strong><sub>i</sub>|² − Σ<sub>i&lt;j</sub> G m<sub>i</sub> m<sub>j</sub> / √(|<strong>r</strong><sub>i</sub>−<strong>r</strong><sub>j</sub>|² + ε²)</div>
+          <div class="eq">E = Σ ½ m<sub>i</sub> |<strong>v</strong><sub>i</sub>|² − Σ<sub>i<j</sub> G m<sub>i</sub> m<sub>j</sub> / √(|<strong>r</strong><sub>i</sub>−<strong>r</strong><sub>j</sub>|² + ε²)</div>
           <div class="eq"><strong>P</strong> = Σ m<sub>i</sub> <strong>v</strong><sub>i</sub></div>
           <div class="eq"><strong>L</strong> = Σ m<sub>i</sub> (<strong>r</strong><sub>i</sub> × <strong>v</strong><sub>i</sub>)</div>
         </div>
@@ -108,7 +109,7 @@
           <div class="kv"><span class="k">η (dt)</span><span class="v mono" id="m-eta">—</span></div>
           <div class="kv"><span class="k">dt range</span><span class="v mono" id="m-dtrange">—</span></div>
         </div>
-        <p class="note">Forest-Ruth = three leapfrogs with weights (θ, 1−2θ, θ). Adaptive dt is not strictly symplectic; close encounters increase energy drift.</p>
+        <p class="note">Forest-Ruth = three leapfrogs with weights (θ, 1−2θ, θ). Adaptive dt is not strictly symplectic.</p>
         <ul class="notes" id="math-notes"></ul>
       </section>
       <section>
@@ -137,7 +138,6 @@
         <h3>Provenance</h3>
         <div class="kv"><span class="k">Origin</span><span class="v">synthetic · physical = false</span></div>
         <div class="kv"><span class="k">Source</span><span class="v">metafield-nbody</span></div>
-        <p class="note">Every emitted tick is schema-validated and hash-chained before admission. The visualizer never invents FieldTicks.</p>
       </section>
       <section>
         <h3>Inspect Tick</h3>
@@ -167,7 +167,6 @@
         <h3>|P| and |L|</h3>
         <canvas id="plot-mom" width="360" height="120"></canvas>
       </section>
-      <p class="note">Plots use recorded simulation history, not interpolated display frames.</p>
     </div>
 
     <div class="panel" id="panel-scene">
@@ -194,7 +193,6 @@
         <h3>Trail vector spacing</h3>
         <input type="range" id="trail-vec-stride" min="1" max="40" value="8"/>
         <span id="trail-vec-stride-val" class="mono">8</span>
-        <p class="note">Sample every N permanent-trail points for direction arrows.</p>
       </section>
       <section>
         <h3>Vector scale</h3>
@@ -209,13 +207,70 @@
       <section>
         <h3>Permanent trails</h3>
         <button id="btn-clear-perm">Clear permanent trails</button>
-        <p class="note">Accumulate until reset / scenario change. Display history only — not a force field.</p>
       </section>
       <section>
         <h3>Camera</h3>
         <button id="btn-frame">Frame all</button>
         <button id="btn-top">Top view</button>
         <button id="btn-side">Side view</button>
+      </section>
+    </div>
+
+    <div class="panel" id="panel-lab">
+      <section>
+        <h3>Interactive Dynamics Laboratory</h3>
+        <p class="note">Isolated fixed-step experiments. Does not mutate the live NBodyField or FieldTick chain.</p>
+      </section>
+      <section>
+        <h3>Run experiment</h3>
+        <div class="grid2">
+          <div class="kv"><span class="k">Scenario template</span>
+            <select id="lab-scenario"></select>
+          </div>
+          <div class="kv"><span class="k">Integrator</span>
+            <select id="lab-integrator"></select>
+          </div>
+          <div class="kv"><span class="k">dt</span>
+            <input type="number" id="lab-dt" class="mono" value="0.001" step="0.0001" min="1e-9"/>
+          </div>
+          <div class="kv"><span class="k">Steps</span>
+            <input type="number" id="lab-steps" class="mono" value="1000" step="100" min="1"/>
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="lab-run">Run</button>
+          <button id="lab-run-rk4">Run RK4</button>
+          <button id="lab-run-fr">Run FR fixed</button>
+        </div>
+        <pre id="lab-result" class="mono small">—</pre>
+      </section>
+      <section>
+        <h3>Energy drift</h3>
+        <canvas id="lab-plot-drift" width="360" height="120"></canvas>
+        <div class="grid2">
+          <div class="kv"><span class="k">E₀</span><span class="v mono" id="lab-e0">—</span></div>
+          <div class="kv"><span class="k">Rel. drift</span><span class="v mono" id="lab-rel">—</span></div>
+          <div class="kv"><span class="k">Max |ΔE|</span><span class="v mono" id="lab-maxd">—</span></div>
+          <div class="kv"><span class="k">Mean |ΔE|</span><span class="v mono" id="lab-meand">—</span></div>
+        </div>
+        <p class="note">Bounded oscillation is typical for symplectic methods; secular growth indicates non-symplectic drift.</p>
+      </section>
+      <section>
+        <h3>Parameter sweep (dt)</h3>
+        <div class="row">
+          <button id="lab-sweep-dt">Sweep dt ∈ {1e-3, 2e-3, 5e-3}</button>
+          <button id="lab-sweep-cancel">Cancel</button>
+        </div>
+        <pre id="lab-sweep-status" class="mono small">—</pre>
+      </section>
+      <section>
+        <h3>Experiment history</h3>
+        <div id="lab-history" class="mono small">—</div>
+      </section>
+      <section>
+        <h3>Compare last two</h3>
+        <button id="lab-compare">Compare</button>
+        <pre id="lab-compare-out" class="mono small">—</pre>
       </section>
     </div>
   </aside>
