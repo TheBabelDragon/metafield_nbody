@@ -12,9 +12,26 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 const BODY_COLORS = [0x3ecfef, 0xf0b429, 0xa78bfa, 0x34d399, 0xf87171, 0x60a5fa];
 
 const state = {
-  data: null, selectedBody: null, trails: true, showVel: true, showAcc: false,
-  showLabels: true, showGrid: true, showCom: true, showAxes: true, bloom: true,
-  cinematic: false, trailLen: 600, vecScale: 20, bodyScale: 12, fps: 0, pollHz: 0, latency: 0,
+  data: null,
+  selectedBody: null,
+  trails: true,
+  permTrails: true,
+  trailVecs: true,
+  showVel: true,
+  showAcc: false,
+  showLabels: true,
+  showGrid: true,
+  showCom: true,
+  showAxes: true,
+  bloom: true,
+  cinematic: false,
+  trailLen: 600,
+  trailVecStride: 8,
+  vecScale: 20,
+  bodyScale: 12,
+  fps: 0,
+  pollHz: 0,
+  latency: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -30,7 +47,9 @@ document.querySelectorAll("#tabs button").forEach((btn) => {
 });
 
 const bindToggle = (id, key) => {
-  $(id).addEventListener("change", (e) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener("change", (e) => {
     state[key] = e.target.checked;
     if (key === "cinematic") {
       document.body.classList.toggle("cinematic", state.cinematic);
@@ -41,6 +60,8 @@ const bindToggle = (id, key) => {
   });
 };
 bindToggle("tog-trails", "trails");
+bindToggle("tog-perm-trails", "permTrails");
+bindToggle("tog-trail-vecs", "trailVecs");
 bindToggle("tog-vel", "showVel");
 bindToggle("tog-acc", "showAcc");
 bindToggle("tog-labels", "showLabels");
@@ -54,6 +75,14 @@ $("trail-len").addEventListener("input", (e) => {
   state.trailLen = +e.target.value;
   $("trail-len-val").textContent = state.trailLen;
 });
+const tvs = $("trail-vec-stride");
+if (tvs) {
+  tvs.addEventListener("input", (e) => {
+    state.trailVecStride = Math.max(1, +e.target.value);
+    $("trail-vec-stride-val").textContent = state.trailVecStride;
+    if (state.data) updatePermanentTrails(state.data);
+  });
+}
 $("vec-scale").addEventListener("input", (e) => {
   state.vecScale = +e.target.value;
   $("vec-scale-val").textContent = state.vecScale;
@@ -63,6 +92,8 @@ $("body-scale").addEventListener("input", (e) => {
   $("body-scale-val").textContent = state.bodyScale;
   if (state.data) resizeBodies(state.data.bodies);
 });
+const bcp = $("btn-clear-perm");
+if (bcp) bcp.addEventListener("click", () => cmd("clear_permanent_trails"));
 
 $("btn-play").addEventListener("click", () => cmd("toggle"));
 $("btn-step").addEventListener("click", () => cmd("step", 1));
@@ -126,9 +157,9 @@ function makeStars(n = 2500) {
 }
 scene.add(makeStars());
 scene.add(new THREE.AmbientLight(0x334455, 0.6));
-const key = new THREE.DirectionalLight(0xffffff, 0.9);
-key.position.set(5, 8, 4);
-scene.add(key);
+const keyLight = new THREE.DirectionalLight(0xffffff, 0.9);
+keyLight.position.set(5, 8, 4);
+scene.add(keyLight);
 
 const grid = new THREE.GridHelper(12, 24, 0x1a3050, 0x122033);
 grid.material.transparent = true;
@@ -147,7 +178,17 @@ scene.add(comMesh);
 
 const bodyGroup = new THREE.Group();
 scene.add(bodyGroup);
-let bodyMeshes = [], trailLines = [], velArrows = [], accArrows = [], labelSprites = [];
+const permTrailGroup = new THREE.Group();
+scene.add(permTrailGroup);
+const trailVecGroup = new THREE.Group();
+scene.add(trailVecGroup);
+let bodyMeshes = [];
+let trailLines = [];
+let permTrailLines = [];
+let trailVecLines = [];
+let velArrows = [];
+let accArrows = [];
+let labelSprites = [];
 
 function makeLabel(text, color) {
   const c = document.createElement("canvas");
@@ -164,7 +205,10 @@ function makeLabel(text, color) {
 
 function rebuildBodies(bodies) {
   while (bodyGroup.children.length) bodyGroup.remove(bodyGroup.children[0]);
-  bodyMeshes = []; trailLines = []; velArrows = []; accArrows = []; labelSprites = [];
+  while (permTrailGroup.children.length) permTrailGroup.remove(permTrailGroup.children[0]);
+  while (trailVecGroup.children.length) trailVecGroup.remove(trailVecGroup.children[0]);
+  bodyMeshes = []; trailLines = []; permTrailLines = []; trailVecLines = [];
+  velArrows = []; accArrows = []; labelSprites = [];
   bodies.forEach((b, i) => {
     const color = BODY_COLORS[i % BODY_COLORS.length];
     const r = massRadius(b.m);
@@ -182,6 +226,12 @@ function rebuildBodies(bodies) {
     const line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 }));
     bodyGroup.add(line);
     trailLines.push(line);
+    const pLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 }));
+    permTrailGroup.add(pLine);
+    permTrailLines.push(pLine);
+    const tvLine = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.75 }));
+    trailVecGroup.add(tvLine);
+    trailVecLines.push(tvLine);
     const vLine = makeArrow(color, 0.9);
     bodyGroup.add(vLine);
     velArrows.push(vLine);
@@ -221,9 +271,48 @@ function updateSceneVisibility() {
   axes.visible = state.showAxes;
   comMesh.visible = state.showCom;
   trailLines.forEach((l) => (l.visible = state.trails));
+  permTrailLines.forEach((l) => (l.visible = state.permTrails));
+  trailVecLines.forEach((l) => (l.visible = state.trailVecs));
   velArrows.forEach((a) => (a.visible = state.showVel));
   accArrows.forEach((a) => (a.visible = state.showAcc));
   labelSprites.forEach((s) => (s.visible = state.showLabels));
+}
+
+function updatePermanentTrails(data) {
+  if (!data.permanent_trails || !permTrailLines.length) return;
+  const stride = Math.max(1, state.trailVecStride);
+  const vScale = state.vecScale * 0.012;
+  data.permanent_trails.forEach((samples, i) => {
+    if (!permTrailLines[i]) return;
+    const n = samples.length;
+    const arr = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) {
+      const x = samples[k].x;
+      arr[k * 3] = x[0]; arr[k * 3 + 1] = x[1]; arr[k * 3 + 2] = x[2];
+    }
+    permTrailLines[i].geometry.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    permTrailLines[i].geometry.setDrawRange(0, n);
+    permTrailLines[i].geometry.attributes.position.needsUpdate = true;
+    if (permTrailLines[i].geometry.computeBoundingSphere) {
+      permTrailLines[i].geometry.computeBoundingSphere();
+    }
+    if (!trailVecLines[i]) return;
+    const indices = [];
+    for (let k = 0; k < n; k += stride) indices.push(k);
+    if (n > 0 && indices[indices.length - 1] !== n - 1) indices.push(n - 1);
+    const seg = new Float32Array(indices.length * 6);
+    for (let j = 0; j < indices.length; j++) {
+      const s = samples[indices[j]];
+      const x = s.x, v = s.v, o = j * 6;
+      seg[o] = x[0]; seg[o + 1] = x[1]; seg[o + 2] = x[2];
+      seg[o + 3] = x[0] + v[0] * vScale;
+      seg[o + 4] = x[1] + v[1] * vScale;
+      seg[o + 5] = x[2] + v[2] * vScale;
+    }
+    trailVecLines[i].geometry.setAttribute("position", new THREE.BufferAttribute(seg, 3));
+    trailVecLines[i].geometry.setDrawRange(0, indices.length * 2);
+    trailVecLines[i].geometry.attributes.position.needsUpdate = true;
+  });
 }
 
 function setArrow(group, origin, dir, scale) {
@@ -256,6 +345,7 @@ function updateBodies(data) {
       trailLines[i].geometry.attributes.position.needsUpdate = true;
     }
   });
+  updatePermanentTrails(data);
   const com = data.invariants.com;
   comMesh.position.set(com[0], com[1], com[2]);
 }
@@ -364,7 +454,9 @@ function updateUI(data) {
   $("t-com").textContent = fmtVec(inv.com);
   $("t-fps").textContent = state.fps.toFixed(0);
   $("t-poll").textContent = state.pollHz.toFixed(1);
-  $("t-trail").textContent = data.trails ? data.trails.reduce((s, t) => s + t.length, 0) : 0;
+  const eph = data.trails ? data.trails.reduce((s, t) => s + t.length, 0) : 0;
+  const perm = data.permanent_trail_meta ? data.permanent_trail_meta.points : 0;
+  $("t-trail").textContent = `${eph} / ${perm}`;
   $("t-lat").textContent = state.latency.toFixed(0) + " ms";
 
   let html = "<table><tr><th>#</th><th>m</th><th>|v|</th><th>|a|</th></tr>";
