@@ -46,19 +46,34 @@ def _summary(result):
     return out
 
 
+def _dim_from(data, ic=None):
+    if data.get("dim") is not None:
+        return int(data["dim"])
+    if ic is not None and ic.get("dim") is not None:
+        return int(ic["dim"])
+    return 3
+
+
 def _lab_run(handler, data):
     if data.get("config"):
         cfg = data["config"]
     else:
         if data.get("ic_custom"):
+            dim = _dim_from(data)
             ic = E.make_custom_ic(
                 data["ic_custom"]["m"],
                 data["ic_custom"]["x"],
                 data["ic_custom"]["v"],
                 name=data["ic_custom"].get("name", "custom"),
+                dim=dim,
             )
         else:
             ic = Lab.default_lab_ic(data.get("scenario", "1"))
+            # Stock scenarios are 3-D; dim!=3 requires pad via lab only when requested
+            dim = _dim_from(data, ic)
+            if dim != 3:
+                from . import ic_helpers as ICH
+                ic = ICH.pad_to_dim(ic, dim)
         cfg = E.build_config(
             ic=ic,
             integrator_id=data.get("integrator_id", "forest_ruth4_fixed"),
@@ -67,6 +82,7 @@ def _lab_run(handler, data):
             duration=data.get("duration"),
             G=float(data.get("G", P.G)),
             softening=float(data.get("softening", P.SOFTENING)),
+            dim=_dim_from(data, ic),
             label=data.get("label") or "",
             parent_id=data.get("parent_id"),
             changes=data.get("changes"),
@@ -114,14 +130,20 @@ def handle_lab_post(handler, path, data):
             base = data.get("config")
             if not base:
                 if data.get("ic_custom"):
+                    dim = _dim_from(data)
                     ic = E.make_custom_ic(
                         data["ic_custom"]["m"],
                         data["ic_custom"]["x"],
                         data["ic_custom"]["v"],
                         name=data["ic_custom"].get("name", "custom"),
+                        dim=dim,
                     )
                 else:
                     ic = Lab.default_lab_ic(data.get("scenario", "1"))
+                    dim = _dim_from(data, ic)
+                    if dim != 3:
+                        from . import ic_helpers as ICH
+                        ic = ICH.pad_to_dim(ic, dim)
                 base = E.build_config(
                     ic=ic,
                     integrator_id=data.get("integrator_id", "forest_ruth4_fixed"),
@@ -129,6 +151,7 @@ def handle_lab_post(handler, path, data):
                     n_steps=int(data.get("n_steps", 1000)),
                     G=float(data.get("G", P.G)),
                     softening=float(data.get("softening", P.SOFTENING)),
+                    dim=_dim_from(data, ic),
                     label=data.get("label") or "sweep-base",
                 )
             out = handler.lab.start_sweep(
@@ -146,7 +169,8 @@ def handle_lab_post(handler, path, data):
         return True
     if path == "/api/lab/validate_ic":
         try:
-            E.validate_bodies(data["m"], data["x"], data["v"])
+            dim = int(data.get("dim", 3))
+            E.validate_bodies(data["m"], data["x"], data["v"], dim=dim)
             handler._json(200, {"ok": True})
         except Exception as exc:
             handler._json(200, {"ok": False, "msg": str(exc)})
@@ -154,6 +178,10 @@ def handle_lab_post(handler, path, data):
     if path == "/api/lab/ic_from_scenario":
         try:
             ic = E.bodies_from_scenario(data.get("scenario", "1"))
+            dim = int(data.get("dim", 3))
+            if dim != 3:
+                from . import ic_helpers as ICH
+                ic = ICH.pad_to_dim(ic, dim)
             handler._json(200, {"ok": True, "ic": ic})
         except Exception as exc:
             handler._json(400, {"ok": False, "msg": str(exc)})
