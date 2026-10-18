@@ -30,9 +30,11 @@ explicit_euler
     Included only for pedagogical comparison — not recommended for production.
 
 logh_leapfrog
-    Logarithmic Hamiltonian (extended phase-space) leapfrog.
-    Preto & Tremaine (1999) / Mikkola & Tanikawa (1999). Fixed fictitious
-    step Δτ yields adaptive physical timestep. Symplectic in extended space.
+    Logarithmic Hamiltonian (extended phase-space) leapfrog (2nd order).
+    Preto & Tremaine (1999) / Mikkola & Tanikawa (1999).
+
+logh_yoshida4
+    Yoshida 4th-order composition of LogH leapfrogs.
 
 Assumptions
 -----------
@@ -199,6 +201,11 @@ def logh_leapfrog(m, x, v, h, G=None, soft2=None, dim=3):
     return LH.logh_leapfrog(m, x, v, h, G=G, soft2=soft2, dim=dim)
 
 
+def logh_yoshida4(m, x, v, h, G=None, soft2=None, dim=3):
+    """4th-order LogH via Yoshida composition (fixed fictitious step h = Δτ)."""
+    return LH.logh_yoshida4(m, x, v, h, G=G, soft2=soft2, dim=dim)
+
+
 INTEGRATORS = {
     "forest_ruth4_fixed": {
         "fn": forest_ruth4_fixed,
@@ -244,6 +251,16 @@ INTEGRATORS = {
             "Preto-Tremaine / Mikkola-Tanikawa logarithmic Hamiltonian. "
             "Fixed fictitious step yields adaptive physical timestep. "
             "Symplectic in extended phase space."
+        ),
+    },
+    "logh_yoshida4": {
+        "fn": logh_yoshida4,
+        "name": "LogH Yoshida 4 (extended phase space)",
+        "order": 4,
+        "symplectic": True,
+        "notes": (
+            "Yoshida composition of three LogH leapfrogs. "
+            "4th-order in fictitious time; symplectic in extended phase space."
         ),
     },
 }
