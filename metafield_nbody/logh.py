@@ -9,6 +9,8 @@ Primary references
 * Mikkola, S. & Tanikawa, K. 1999, Celest. Mech. Dyn. Astron. 74, 287
   "Explicit symplectic algorithms for time-transformed Hamiltonians"
 
+* Yoshida, H. 1990, Phys. Lett. A 150, 262 — composition for 4th-order
+
 Mathematical outline
 --------------------
 Original Hamiltonian H = T(p) + U(q).
@@ -24,25 +26,33 @@ in the extended phase space.
 For a pure inverse-square two-body problem the leapfrog form integrates the
 Kepler ellipse exactly (only a phase / time error remains).
 
+The 4th-order method composes three 2nd-order LogH leapfrogs with Yoshida
+weights (θ, 1−2θ, θ) where θ = 1/(2−2^(1/3)), identical to the Forest-Ruth
+coefficient already used in physics.py.
+
 Implementation notes
 --------------------
 * Softening is retained for consistency with the rest of the engine; the exact
   Kepler property holds only in the unsoftened inverse-square limit.
 * B (binding energy shift) defaults to −E₀ (initial total energy).  A small
   positive floor prevents log-of-zero when kinetic energy vanishes.
-* The method is exposed as a *lab* integrator.  The golden-pinned Forest-Ruth
+* Methods are exposed as *lab* integrators.  The golden-pinned Forest-Ruth
   operator used for FieldTick emission is not altered by this module.
 * Strict symplecticity is claimed only for the extended-space map with fixed
   Δτ; physical-time adaptivity is a consequence of the time transformation.
 """
 from __future__ import annotations
 
-from math import sqrt, log, exp, inf
-from typing import List, Optional, Tuple
+from math import sqrt
+from typing import List
 
 from . import physics as P
 
 Vec = List[float]
+
+# Yoshida / Forest-Ruth weight (same constant as physics.THETA)
+_YOSHIDA_THETA = P.THETA
+_YOSHIDA_W0 = P.W0
 
 
 def _kinetic(m, v, dim):
@@ -86,20 +96,9 @@ def logh_leapfrog_step(
 ):
     """One second-order LogH leapfrog step in fictitious time.
 
-    Parameters
-    ----------
-    m, x, v : body masses, positions, velocities
-    dtau : fixed fictitious-time step
-    dim : spatial dimensionality
-    B : binding-energy shift (default = −E if E < 0, else 1.0)
-    t : current physical time (advanced and returned)
-    eps_floor : numerical floor inside logarithms
-
     Returns
     -------
     x_new, v_new, t_new, info
-
-    info contains diagnostic fields: dtau, dt_physical, T, U, B, converged.
     """
     dim = int(dim)
     n = len(m)
@@ -114,9 +113,7 @@ def logh_leapfrog_step(
         B = -E if E < 0.0 else 1.0
     B = float(B)
 
-    # --- drift half-step (coordinates advance; momenta fixed) ---------------
-    # d q / dτ = ∂Γ/∂p = (1/(T+B)) * ∂T/∂p = v / (T+B)
-    # d t / dτ = 1/(T+B)
+    # drift half
     denom_T = max(T + B, eps_floor)
     h_half = 0.5 * dtau / denom_T
     for i in range(n):
@@ -124,9 +121,7 @@ def logh_leapfrog_step(
             x[i][c] += h_half * v[i][c]
     t = t + h_half
 
-    # --- kick (momenta advance; coordinates fixed) --------------------------
-    # d p / dτ = -∂Γ/∂q = (1/(-U)) * (-∂U/∂q) = a / (-U)   for U < 0
-    # With softening U is still negative for bound systems.
+    # kick
     U = _potential(m, x, dim)
     denom_U = max(-U, eps_floor)
     a = _accelerations(m, x, dim)
@@ -135,7 +130,7 @@ def logh_leapfrog_step(
         for c in range(dim):
             v[i][c] += kick * a[i][c]
 
-    # --- drift half-step again ----------------------------------------------
+    # drift half
     T = _kinetic(m, v, dim)
     denom_T = max(T + B, eps_floor)
     h_half = 0.5 * dtau / denom_T
@@ -144,30 +139,73 @@ def logh_leapfrog_step(
             x[i][c] += h_half * v[i][c]
     t = t + h_half
 
-    dt_physical = dtau * (0.5 / max(_kinetic(m, v, dim) + B, eps_floor)
-                          + 0.5 / max(T + B, eps_floor))  # rough diagnostic
-
     info = {
         "dtau": dtau,
-        "dt_physical_est": h_half * 2.0,  # last full drift contribution proxy
+        "dt_physical_est": h_half * 2.0,
         "T": T,
         "U": U,
         "B": B,
         "converged": True,
         "dim": dim,
+        "order": 2,
     }
     return x, v, t, info
 
 
-def logh_leapfrog(m, x, v, h, G=None, soft2=None, dim=3, B=None):
-    """Lab-compatible wrapper: interpret ``h`` as fictitious step Δτ.
+def logh_yoshida4_step(
+    m,
+    x,
+    v,
+    dtau,
+    *,
+    dim=3,
+    B=None,
+    t=0.0,
+    eps_floor=1e-30,
+):
+    """Fourth-order LogH step via Yoshida composition of three leapfrogs.
 
-    Signature matches other lab integrators (m, x, v, h, ...) so it can be
-    registered in INTEGRATORS.  Physical time is not returned through this
-    interface; use logh_leapfrog_step for full diagnostics.
+    φ₄(Δτ) = φ₂(θ Δτ) ∘ φ₂((1−2θ) Δτ) ∘ φ₂(θ Δτ)
+    with θ = 1/(2−2^(1/3)).
     """
-    # G / soft2 overrides are not yet wired; the module uses physics defaults.
+    dim = int(dim)
+    x = [list(p) for p in x]
+    v = [list(q) for q in v]
+
+    if B is None:
+        T = _kinetic(m, v, dim)
+        U = _potential(m, x, dim)
+        E = T + U
+        B = -E if E < 0.0 else 1.0
+    B = float(B)
+
+    x, v, t, _ = logh_leapfrog_step(
+        m, x, v, _YOSHIDA_THETA * dtau, dim=dim, B=B, t=t, eps_floor=eps_floor
+    )
+    x, v, t, _ = logh_leapfrog_step(
+        m, x, v, _YOSHIDA_W0 * dtau, dim=dim, B=B, t=t, eps_floor=eps_floor
+    )
+    x, v, t, info = logh_leapfrog_step(
+        m, x, v, _YOSHIDA_THETA * dtau, dim=dim, B=B, t=t, eps_floor=eps_floor
+    )
+    info = dict(info)
+    info["dtau"] = dtau
+    info["order"] = 4
+    info["composition"] = "yoshida"
+    return x, v, t, info
+
+
+def logh_leapfrog(m, x, v, h, G=None, soft2=None, dim=3, B=None):
+    """Lab-compatible wrapper: h = fixed fictitious step Δτ (2nd order)."""
     x_new, v_new, _t, _info = logh_leapfrog_step(
+        m, x, v, h, dim=dim, B=B
+    )
+    return x_new, v_new
+
+
+def logh_yoshida4(m, x, v, h, G=None, soft2=None, dim=3, B=None):
+    """Lab-compatible wrapper: h = fixed fictitious step Δτ (4th order)."""
+    x_new, v_new, _t, _info = logh_yoshida4_step(
         m, x, v, h, dim=dim, B=B
     )
     return x_new, v_new
