@@ -29,12 +29,17 @@ explicit_euler
     Forward Euler. Non-symplectic, unstable for orbital dynamics at large dt.
     Included only for pedagogical comparison — not recommended for production.
 
+logh_leapfrog
+    Logarithmic Hamiltonian (extended phase-space) leapfrog.
+    Preto & Tremaine (1999) / Mikkola & Tanikawa (1999). Fixed fictitious
+    step Δτ yields adaptive physical timestep. Symplectic in extended space.
+
 Assumptions
 -----------
 * Force depends only on positions (no velocity-dependent forces).
 * Softened Newtonian gravity (same as physics.accelerations), now
   dimension-parameterised (dim=2,3,4).
-* Fixed step size (adaptive control is exclusive to NBodyField / Forest-Ruth).
+* Fixed step size for classical methods; LogH uses fixed fictitious step.
 """
 from __future__ import annotations
 
@@ -42,6 +47,7 @@ from math import sqrt
 from typing import Callable, List, Tuple
 
 from . import physics as P
+from . import logh as LH
 
 Vec = List[float]
 State = Tuple[List[Vec], List[Vec]]
@@ -70,7 +76,6 @@ def _accelerations(m, x, G=None, soft2=None, dim=3):
                 d = xj[c] - xi[c]
                 dx[c] = d
                 r2 += d * d
-            # same force-factor convention as physics._force_factor
             if dim == 3:
                 f = G / (r2 * sqrt(r2))
             elif dim == 2:
@@ -189,6 +194,11 @@ def explicit_euler(m, x, v, h, G=None, soft2=None, dim=3):
     return x, v
 
 
+def logh_leapfrog(m, x, v, h, G=None, soft2=None, dim=3):
+    """Logarithmic Hamiltonian leapfrog (fixed fictitious step h = Δτ)."""
+    return LH.logh_leapfrog(m, x, v, h, G=G, soft2=soft2, dim=dim)
+
+
 INTEGRATORS = {
     "forest_ruth4_fixed": {
         "fn": forest_ruth4_fixed,
@@ -225,6 +235,17 @@ INTEGRATORS = {
         "symplectic": False,
         "notes": "Forward Euler; pedagogic only — unstable for orbits at large dt.",
     },
+    "logh_leapfrog": {
+        "fn": logh_leapfrog,
+        "name": "LogH leapfrog (extended phase space)",
+        "order": 2,
+        "symplectic": True,
+        "notes": (
+            "Preto-Tremaine / Mikkola-Tanikawa logarithmic Hamiltonian. "
+            "Fixed fictitious step yields adaptive physical timestep. "
+            "Symplectic in extended phase space."
+        ),
+    },
 }
 
 
@@ -252,8 +273,4 @@ def get_step(integrator_id: str) -> Callable:
 
 def invariants(m, x, v, G=None, soft2=None, dim=3):
     """Lab invariants; delegates to physics when using default constants."""
-    if G is None and soft2 is None:
-        return P.invariants(m, x, v, dim=dim)
-    # fallback for custom G/softening: use physics with temporary override
-    # (lab rarely overrides; keep simple and consistent)
     return P.invariants(m, x, v, dim=dim)
