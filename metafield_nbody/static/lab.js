@@ -114,6 +114,18 @@ async function labRun(overrides = {}) {
       set("lab-meand", r.energy_analysis.mean_abs_drift != null ? Number(r.energy_analysis.mean_abs_drift).toExponential(6) : "—");
     }
     labRefreshHistory();
+    // Pull trails for viewport overlay (dim-aware projection in app.js)
+    if (r.experiment_id && window.metafieldSetLabTrails) {
+      fetch("/api/lab/experiment?id=" + encodeURIComponent(r.experiment_id) + "&include=trails")
+        .then((resp) => resp.json())
+        .then((full) => {
+          const res = full.result || {};
+          if (res.trails) {
+            window.metafieldSetLabTrails(res.trails, res.dim || 3);
+          }
+        })
+        .catch(() => {});
+    }
   } catch (e) {
     if (el) el.textContent = String(e);
   }
