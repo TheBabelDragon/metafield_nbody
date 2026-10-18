@@ -157,7 +157,7 @@
         <button id="btn-side">Side view</button></section>
       <section>
         <h3>Projection (display axes)</h3>
-        <p class="note">Map source coordinates onto the 3D viewport. For lab dim≠3 overlays use w→Z etc.</p>
+        <p class="note">Map source coordinates onto the 3D viewport. For lab dim≠3 overlays map x₃ (w) onto an axis.</p>
         <div class="grid2">
           <div class="kv"><span class="k">Viewport X ←</span>
             <select id="proj-x"><option value="0" selected>x₀</option><option value="1">x₁</option><option value="2">x₂</option><option value="3">x₃ (w)</option></select>
@@ -200,7 +200,7 @@
           <button id="lab-run-logh">LogH 2</button>
           <button id="lab-run-logh4">LogH 4</button>
         </div>
-        <p class="note">Dim≠3 pads stock scenario ICs with zeros (lab only). Live Field stays 3-D; use Scene → Projection for axis mapping.</p>
+        <p class="note">Dim≠3 pads stock scenario ICs with zeros (lab only). Enable Scene → Overlay last lab trails to visualize.</p>
         <pre id="lab-result" class="mono small">—</pre>
       </section>
       <section>
@@ -244,5 +244,6 @@
 </div>
 <script type="module" src="/static/app.js"></script>
 <script src="/static/lab.js"></script>
+<script src="/static/project.js"></script>
 </body>
 </html>
