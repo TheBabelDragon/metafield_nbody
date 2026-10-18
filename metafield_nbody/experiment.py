@@ -1,4 +1,11 @@
-"""Experiment manifests, IC validation, lineage."""
+"""Experiment manifests, IC validation, lineage.
+
+Dimensional support (2026-10-18)
+--------------------------------
+Configs accept ``dim`` (2, 3, or 4; default 3). Body vectors are validated
+against the declared dimensionality. Existing scenario ICs remain 3-D;
+custom ICs may supply higher- or lower-dimensional state.
+"""
 from __future__ import annotations
 
 import copy
@@ -12,7 +19,7 @@ from . import physics as P
 from . import scenarios as S
 from .integrators import INTEGRATORS
 
-MANIFEST_VERSION = "1.0.0"
+MANIFEST_VERSION = "1.1.0"
 MAX_BODIES = 32
 MAX_STEPS = 500000
 MAX_DURATION = 1000.0
@@ -21,6 +28,7 @@ MAX_DT = 1.0
 MAX_MASS = 1e12
 MAX_COORD = 1e6
 MAX_SWEEP_SAMPLES = 64
+SUPPORTED_DIMS = (2, 3, 4)
 
 
 class ValidationError(ValueError):
@@ -34,7 +42,10 @@ def _finite(x):
         return False
 
 
-def validate_bodies(m, x, v):
+def validate_bodies(m, x, v, dim=3):
+    dim = int(dim)
+    if dim not in SUPPORTED_DIMS:
+        raise ValidationError("dim must be one of %s" % (SUPPORTED_DIMS,))
     if not isinstance(m, (list, tuple)) or not m:
         raise ValidationError("at least one body required")
     n = len(m)
@@ -45,23 +56,24 @@ def validate_bodies(m, x, v):
     for i in range(n):
         if not _finite(m[i]) or m[i] <= 0:
             raise ValidationError("invalid mass at %d" % i)
-        if len(x[i]) != 3 or len(v[i]) != 3:
-            raise ValidationError("bad vector at %d" % i)
-        for c in range(3):
+        if len(x[i]) != dim or len(v[i]) != dim:
+            raise ValidationError("bad vector length at %d (expected dim=%d)" % (i, dim))
+        for c in range(dim):
             if not _finite(x[i][c]) or not _finite(v[i][c]):
                 raise ValidationError("non-finite state at %d" % i)
             if abs(x[i][c]) > MAX_COORD or abs(v[i][c]) > MAX_COORD:
                 raise ValidationError("coordinate out of range at %d" % i)
     for i in range(n - 1):
         for j in range(i + 1, n):
-            dx = x[i][0] - x[j][0]
-            dy = x[i][1] - x[j][1]
-            dz = x[i][2] - x[j][2]
-            if dx * dx + dy * dy + dz * dz < P.EPS2 * 0.25:
+            r2 = 0.0
+            for c in range(dim):
+                d = x[i][c] - x[j][c]
+                r2 += d * d
+            if r2 < P.EPS2 * 0.25:
                 raise ValidationError("bodies %d and %d nearly coincident" % (i, j))
 
 
-def validate_run_params(dt, n_steps=None, duration=None, integrator_id=None):
+def validate_run_params(dt, n_steps=None, duration=None, integrator_id=None, dim=3):
     if not _finite(dt) or dt <= 0:
         raise ValidationError("dt must be > 0")
     if dt < MIN_DT or dt > MAX_DT:
@@ -72,6 +84,8 @@ def validate_run_params(dt, n_steps=None, duration=None, integrator_id=None):
         raise ValidationError("invalid n_steps")
     if duration is not None and (not _finite(duration) or duration <= 0 or duration > MAX_DURATION):
         raise ValidationError("invalid duration")
+    if int(dim) not in SUPPORTED_DIMS:
+        raise ValidationError("dim must be one of %s" % (SUPPORTED_DIMS,))
 
 
 def bodies_from_scenario(sel):
@@ -88,14 +102,18 @@ def bodies_from_scenario(sel):
         "v": built["v"],
         "note": built["note"],
         "experimental": False,
+        "dim": 3,
     }
 
 
-def make_custom_ic(m, x, v, name="custom"):
+def make_custom_ic(m, x, v, name="custom", dim=None):
     m = [float(mi) for mi in m]
     x = [[float(c) for c in p] for p in x]
     v = [[float(c) for c in q] for q in v]
-    validate_bodies(m, x, v)
+    if dim is None:
+        dim = len(x[0]) if x else 3
+    dim = int(dim)
+    validate_bodies(m, x, v, dim=dim)
     return {
         "source": "custom",
         "scenario_key": None,
@@ -105,6 +123,7 @@ def make_custom_ic(m, x, v, name="custom"):
         "v": v,
         "note": "user-defined experimental initial conditions",
         "experimental": True,
+        "dim": dim,
     }
 
 
@@ -129,6 +148,7 @@ def build_config(
     duration=None,
     G=None,
     softening=None,
+    dim=None,
     parent_id=None,
     changes=None,
     label="",
@@ -138,8 +158,12 @@ def build_config(
         G = P.G
     if softening is None:
         softening = P.SOFTENING
-    validate_bodies(ic["m"], ic["x"], ic["v"])
-    validate_run_params(dt, n_steps=n_steps, duration=duration, integrator_id=integrator_id)
+    if dim is None:
+        dim = int(ic.get("dim", 3))
+    dim = int(dim)
+    validate_bodies(ic["m"], ic["x"], ic["v"], dim=dim)
+    validate_run_params(dt, n_steps=n_steps, duration=duration,
+                        integrator_id=integrator_id, dim=dim)
     if n_steps is None and duration is None:
         n_steps = 1000
     if n_steps is None:
@@ -150,6 +174,8 @@ def build_config(
         raise ValidationError("invalid G")
     if not _finite(softening) or softening < 0:
         raise ValidationError("invalid softening")
+
+    force_tag = "softened_newtonian_D%d" % dim
     cfg = {
         "manifest_version": MANIFEST_VERSION,
         "experiment_id": new_experiment_id(),
@@ -166,8 +192,14 @@ def build_config(
             "x": ic["x"],
             "v": ic["v"],
             "note": ic.get("note", ""),
+            "dim": dim,
         },
-        "model": {"force": "softened_newtonian", "G": float(G), "softening": float(softening)},
+        "model": {
+            "force": force_tag,
+            "dim": dim,
+            "G": float(G),
+            "softening": float(softening),
+        },
         "integration": {
             "method": integrator_id,
             "method_name": INTEGRATORS[integrator_id]["name"],
@@ -176,7 +208,8 @@ def build_config(
             "dt": float(dt),
             "n_steps": int(n_steps),
             "duration": float(dt) * int(n_steps),
-            "adaptive": False,
+            "adaptive": integrator_id == "logh_leapfrog",
+            "dim": dim,
         },
         "seed": seed,
         "software": {
@@ -198,6 +231,7 @@ def derive_config(parent, changes, label=""):
     integration = copy.deepcopy(parent["integration"])
     model = copy.deepcopy(parent["model"])
     change_notes = []
+    dim = int(model.get("dim", ic.get("dim", 3)))
     if "integrator_id" in changes:
         integration["method"] = changes["integrator_id"]
         change_notes.append("integrator changed")
@@ -216,6 +250,9 @@ def derive_config(parent, changes, label=""):
     if "softening" in changes:
         model["softening"] = float(changes["softening"])
         change_notes.append("softening changed")
+    if "dim" in changes:
+        dim = int(changes["dim"])
+        change_notes.append("dim changed")
     if "ic" in changes:
         ic = changes["ic"]
         change_notes.append("ic replaced")
@@ -225,6 +262,7 @@ def derive_config(parent, changes, label=""):
             changes.get("x", ic["x"]),
             changes.get("v", ic["v"]),
             name=ic.get("scenario_name", "custom"),
+            dim=dim,
         )
         change_notes.append("IC vectors modified")
     return build_config(
@@ -234,6 +272,7 @@ def derive_config(parent, changes, label=""):
         n_steps=integration["n_steps"],
         G=model["G"],
         softening=model["softening"],
+        dim=dim,
         parent_id=parent["experiment_id"],
         changes=change_notes,
         label=label or ("derived-from-%s" % parent["experiment_id"]),
@@ -249,6 +288,7 @@ def diff_configs(a, b):
         ("integration.n_steps", a["integration"]["n_steps"], b["integration"]["n_steps"]),
         ("model.G", a["model"]["G"], b["model"]["G"]),
         ("model.softening", a["model"]["softening"], b["model"]["softening"]),
+        ("model.dim", a["model"].get("dim", 3), b["model"].get("dim", 3)),
     ]
     for path, va, vb in pairs:
         if va != vb:
