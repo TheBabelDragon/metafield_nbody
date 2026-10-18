@@ -5,156 +5,90 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>MetaField N-Body · Celestial Field Observatory</title>
 <link rel="stylesheet" href="/static/style.css"/>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
 </head>
 <body>
 <div id="app">
-  <div id="viewport">
-    <canvas id="c"></canvas>
-    <div id="hud-overlay">
-      <div id="title-bar">
-        <span class="logo">METAFIELD</span>
-        <span class="sep">·</span>
-        <span id="scenario-label">—</span>
-        <span class="sep">·</span>
-        <span id="time-label" class="mono">t = 0</span>
+  <header>
+    <div class="brand">
+      <span class="logo">◉</span>
+      <div>
+        <div class="title">Celestial Field Observatory</div>
+        <div class="subtitle" id="scenario-label">—</div>
       </div>
-      <div id="body-tooltip" class="hidden"></div>
     </div>
-    <div id="cinematic-badge" class="hidden">CINEMATIC</div>
-  </div>
+    <div class="header-meta">
+      <span id="time-label" class="mono">t = 0</span>
+      <select id="sel-scenario"></select>
+    </div>
+  </header>
 
-  <aside id="inspector">
-    <nav id="tabs">
-      <button data-tab="telemetry" class="active">Telemetry</button>
-      <button data-tab="math">Mathematics</button>
-      <button data-tab="field">Field</button>
-      <button data-tab="plots">Plots</button>
-      <button data-tab="scene">Scene</button>
-      <button data-tab="lab">Lab</button>
-    </nav>
+  <main id="viewport-wrap">
+    <div id="viewport"></div>
+    <div id="hud">
+      <div class="hud-row"><span>tick</span><span id="hud-tick" class="mono">0</span></div>
+      <div class="hud-row"><span>E</span><span id="hud-E" class="mono">—</span></div>
+      <div class="hud-row"><span>ΔE/E₀</span><span id="hud-dE" class="mono">—</span></div>
+      <div class="hud-row"><span>digest</span><span id="hud-digest" class="mono">—</span></div>
+    </div>
+  </main>
+
+  <aside id="side">
+    <div class="tabs">
+      <button class="tab active" data-panel="panel-telemetry">Telemetry</button>
+      <button class="tab" data-panel="panel-math">Math</button>
+      <button class="tab" data-panel="panel-lab">Lab</button>
+    </div>
 
     <div class="panel active" id="panel-telemetry">
       <section>
-        <h3>Simulation</h3>
+        <h3>Invariants</h3>
         <div class="grid2">
-          <div class="kv"><span class="k">Scenario</span><span class="v" id="t-scenario">—</span></div>
-          <div class="kv"><span class="k">Bodies</span><span class="v mono" id="t-bodies">—</span></div>
-          <div class="kv"><span class="k">Time</span><span class="v mono" id="t-time">—</span></div>
-          <div class="kv"><span class="k">Tick</span><span class="v mono" id="t-tick">—</span></div>
-          <div class="kv"><span class="k">State</span><span class="v" id="t-state">—</span></div>
-          <div class="kv"><span class="k">Speed</span><span class="v mono" id="t-speed">—</span></div>
+          <div class="kv"><span class="k">Energy</span><span class="v mono" id="inv-E">—</span></div>
+          <div class="kv"><span class="k">Kinetic</span><span class="v mono" id="inv-K">—</span></div>
+          <div class="kv"><span class="k">Potential</span><span class="v mono" id="inv-U">—</span></div>
+          <div class="kv"><span class="k">|ΔE|/|E₀|</span><span class="v mono" id="inv-dE">—</span></div>
+          <div class="kv"><span class="k">|P|</span><span class="v mono" id="inv-P">—</span></div>
+          <div class="kv"><span class="k">|L|</span><span class="v mono" id="inv-L">—</span></div>
         </div>
       </section>
       <section>
-        <h3>Physics</h3>
-        <div class="grid2">
-          <div class="kv"><span class="k">Energy</span><span class="v mono" id="t-energy">—</span></div>
-          <div class="kv"><span class="k">E₀</span><span class="v mono" id="t-e0">—</span></div>
-          <div class="kv"><span class="k">Drift (rel)</span><span class="v mono" id="t-drift">—</span></div>
-          <div class="kv"><span class="k">Kinetic</span><span class="v mono" id="t-ke">—</span></div>
-          <div class="kv"><span class="k">Potential</span><span class="v mono" id="t-pe">—</span></div>
-          <div class="kv"><span class="k">|P|</span><span class="v mono" id="t-pmag">—</span></div>
-          <div class="kv"><span class="k">|L|</span><span class="v mono" id="t-lmag">—</span></div>
-          <div class="kv"><span class="k">Mass</span><span class="v mono" id="t-mass">—</span></div>
-        </div>
-        <div class="kv"><span class="k">COM</span><span class="v mono small" id="t-com">—</span></div>
+        <h3>Energy history</h3>
+        <canvas id="plot-energy" width="360" height="120"></canvas>
       </section>
-      <section><h3>Bodies</h3><div id="body-table"></div></section>
       <section>
-        <h3>Performance</h3>
-        <div class="grid2">
-          <div class="kv"><span class="k">Render FPS</span><span class="v mono" id="t-fps">—</span></div>
-          <div class="kv"><span class="k">Poll Hz</span><span class="v mono" id="t-poll">—</span></div>
-          <div class="kv"><span class="k">Trail pts</span><span class="v mono" id="t-trail">—</span></div>
-          <div class="kv"><span class="k">Latency</span><span class="v mono" id="t-lat">—</span></div>
-        </div>
+        <h3>Display</h3>
+        <label><input type="checkbox" id="tog-trails" checked/> Trails</label>
+        <label><input type="checkbox" id="tog-vel"/> Velocity</label>
+        <label><input type="checkbox" id="tog-acc"/> Acceleration</label>
+        <label><input type="checkbox" id="tog-labels" checked/> Labels</label>
+        <label><input type="checkbox" id="tog-perm" checked/> Permanent trails</label>
+      </section>
+      <section>
+        <h3>FieldTick</h3>
+        <div class="kv"><span class="k">Digest</span><span class="v mono small" id="ft-digest">—</span></div>
+        <div class="kv"><span class="k">Prev</span><span class="v mono small" id="ft-prev">—</span></div>
+        <input type="number" id="tick-index" class="mono" value="0" min="0"/>
+        <button id="btn-tick">Load tick</button>
+        <pre id="tick-payload" class="mono small">—</pre>
       </section>
     </div>
 
     <div class="panel" id="panel-math">
-      <section><h3>Equations of Motion</h3>
-        <div class="eq-block">
-          <div class="eq">d<strong>r</strong><sub>i</sub> / dt = <strong>v</strong><sub>i</sub></div>
-          <div class="eq">d<strong>v</strong><sub>i</sub> / dt = G Σ<sub>j≠i</sub> m<sub>j</sub> (<strong>r</strong><sub>j</sub>−<strong>r</strong><sub>i</sub>) / (|r|² + ε²)<sup>3/2</sup></div>
-        </div>
+      <section>
+        <h3>Model</h3>
+        <div class="kv"><span class="k">Integrator</span><span class="v" id="m-integrator">Forest-Ruth 4</span></div>
+        <div class="kv"><span class="k">Force</span><span class="v" id="m-force">Softened Newtonian</span></div>
+        <div class="kv"><span class="k">G</span><span class="v mono" id="m-G">1</span></div>
+        <div class="kv"><span class="k">ε</span><span class="v mono" id="m-eps">1e-6</span></div>
+        <div class="kv"><span class="k">η</span><span class="v mono" id="m-eta">—</span></div>
       </section>
-      <section><h3>Numerical Method</h3>
-        <div class="grid2">
-          <div class="kv"><span class="k">Integrator</span><span class="v" id="m-integrator">Forest-Ruth 4</span></div>
-          <div class="kv"><span class="k">θ</span><span class="v mono" id="m-theta">—</span></div>
-          <div class="kv"><span class="k">Softening ε</span><span class="v mono" id="m-soft">—</span></div>
-          <div class="kv"><span class="k">η (dt)</span><span class="v mono" id="m-eta">—</span></div>
-          <div class="kv"><span class="k">dt range</span><span class="v mono" id="m-dtrange">—</span></div>
-        </div>
+      <section>
+        <h3>Equations</h3>
+        <pre class="mono small" id="math-eq">—</pre>
         <ul class="notes" id="math-notes"></ul>
       </section>
       <section><h3>Selected Body</h3><div id="sel-body-info" class="mono small">Click a body</div></section>
       <section><h3>Pairwise</h3><div id="pair-table" class="mono small"></div></section>
-    </div>
-
-    <div class="panel" id="panel-field">
-      <section><h3>FieldTick Chain</h3>
-        <div class="grid2">
-          <div class="kv"><span class="k">Digest</span><span class="v mono tiny" id="f-digest">—</span></div>
-          <div class="kv"><span class="k">Prev</span><span class="v mono tiny" id="f-prev">—</span></div>
-          <div class="kv"><span class="k">Ticks</span><span class="v mono" id="f-count">—</span></div>
-          <div class="kv"><span class="k">Last Δt</span><span class="v mono" id="f-dt">—</span></div>
-          <div class="kv"><span class="k">Contract</span><span class="v" id="f-contract">—</span></div>
-          <div class="kv"><span class="k">Operator</span><span class="v mono" id="f-op">—</span></div>
-        </div>
-      </section>
-      <section><h3>Inspect Tick</h3>
-        <div class="row"><input type="number" id="tick-idx" min="0" value="0" class="mono"/><button id="btn-load-tick">Load</button></div>
-        <pre id="tick-payload" class="mono small">—</pre>
-      </section>
-      <section><h3>Export</h3><button id="btn-export">Export JSONL log</button><span id="export-status" class="note"></span></section>
-    </div>
-
-    <div class="panel" id="panel-plots">
-      <section><h3>Energy</h3><canvas id="plot-energy" width="360" height="120"></canvas></section>
-      <section><h3>Relative Energy Drift</h3><canvas id="plot-drift" width="360" height="120"></canvas></section>
-      <section><h3>|P| and |L|</h3><canvas id="plot-mom" width="360" height="120"></canvas></section>
-    </div>
-
-    <div class="panel" id="panel-scene">
-      <section><h3>Display</h3>
-        <label><input type="checkbox" id="tog-trails" checked/> Ephemeral trails</label>
-        <label><input type="checkbox" id="tog-perm-trails" checked/> Permanent trails</label>
-        <label><input type="checkbox" id="tog-trail-vecs" checked/> Trail vectors</label>
-        <label><input type="checkbox" id="tog-vel" checked/> Live velocity vectors</label>
-        <label><input type="checkbox" id="tog-acc"/> Acceleration vectors</label>
-        <label><input type="checkbox" id="tog-labels" checked/> Body labels</label>
-        <label><input type="checkbox" id="tog-grid" checked/> Grid</label>
-        <label><input type="checkbox" id="tog-com" checked/> Center of mass</label>
-        <label><input type="checkbox" id="tog-axes" checked/> Axes</label>
-        <label><input type="checkbox" id="tog-bloom" checked/> Bloom</label>
-        <label><input type="checkbox" id="tog-cinematic"/> Cinematic</label>
-      </section>
-      <section><h3>Ephemeral trail length</h3>
-        <input type="range" id="trail-len" min="50" max="1500" value="600"/>
-        <span id="trail-len-val" class="mono">600</span></section>
-      <section><h3>Trail vector spacing</h3>
-        <input type="range" id="trail-vec-stride" min="1" max="40" value="8"/>
-        <span id="trail-vec-stride-val" class="mono">8</span></section>
-      <section><h3>Vector scale</h3>
-        <input type="range" id="vec-scale" min="1" max="100" value="20"/>
-        <span id="vec-scale-val" class="mono">20</span></section>
-      <section><h3>Body scale</h3>
-        <input type="range" id="body-scale" min="1" max="50" value="12"/>
-        <span id="body-scale-val" class="mono">12</span></section>
-      <section><h3>Permanent trails</h3><button id="btn-clear-perm">Clear permanent trails</button></section>
-      <section><h3>Camera</h3>
-        <button id="btn-frame">Frame all</button>
-        <button id="btn-top">Top view</button>
-        <button id="btn-side">Side view</button></section>
     </div>
 
     <div class="panel" id="panel-lab">
@@ -167,6 +101,13 @@
         <div class="grid2">
           <div class="kv"><span class="k">Scenario</span><select id="lab-scenario"></select></div>
           <div class="kv"><span class="k">Integrator</span><select id="lab-integrator"></select></div>
+          <div class="kv"><span class="k">Dim</span>
+            <select id="lab-dim">
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
           <div class="kv"><span class="k">dt</span><input type="number" id="lab-dt" class="mono" value="0.001" step="0.0001"/></div>
           <div class="kv"><span class="k">Steps</span><input type="number" id="lab-steps" class="mono" value="1000" step="100"/></div>
         </div>
@@ -174,7 +115,10 @@
           <button id="lab-run">Run</button>
           <button id="lab-run-rk4">Run RK4</button>
           <button id="lab-run-fr">Run FR fixed</button>
+          <button id="lab-run-logh">LogH 2</button>
+          <button id="lab-run-logh4">LogH 4</button>
         </div>
+        <p class="note">Dim≠3 pads stock scenario ICs with zeros (lab only). Live Field / 3D view stays 3-D.</p>
         <pre id="lab-result" class="mono small">—</pre>
       </section>
       <section>
@@ -208,15 +152,13 @@
       <button id="btn-play">▶</button>
       <button id="btn-step">⏭</button>
       <button id="btn-reset">↺</button>
+      <label>Speed <input type="range" id="spd" min="0.1" max="50" step="0.1" value="1"/></label>
+      <button id="btn-export">Export log</button>
     </div>
-    <div class="ctrl-group"><label>Scenario <select id="sel-scenario"></select></label></div>
-    <div class="ctrl-group"><label>Speed
-      <input type="range" id="speed" min="0.5" max="60" step="0.5" value="8"/>
-      <span id="speed-val" class="mono">8</span></label></div>
-    <div class="ctrl-group status" id="conn-status">connecting…</div>
   </footer>
 </div>
-<script type="module" src="/static/app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="/static/app.js"></script>
 <script src="/static/lab.js"></script>
 </body>
 </html>
