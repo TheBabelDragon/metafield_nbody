@@ -198,6 +198,7 @@ class VizSession:
                         "G = 1 (normalized units)",
                         "Softening eps = %s (Plummer)" % P.SOFTENING,
                         "Adaptive dt is not strictly symplectic",
+                        "Lab methods (LogH, dim≠3) run in the Dynamics Lab only",
                     ],
                 },
             }
@@ -285,9 +286,14 @@ class VizHandler(BaseHTTPRequestHandler):
     lab = None
 
     def log_message(self, fmt, *args):
-        if "/api/" in (args[0] if args else ""):
+        # BaseHTTPRequestHandler may pass non-str args (e.g. status code int).
+        try:
+            msg = fmt % args if args else (fmt or "")
+        except Exception:
+            msg = " ".join(str(a) for a in ((fmt,) + args))
+        if "/api/" in msg:
             return
-        super().log_message(fmt, *args)
+        super().log_message("%s", msg)
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
