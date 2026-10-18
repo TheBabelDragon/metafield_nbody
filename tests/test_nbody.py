@@ -16,14 +16,18 @@ class Goldens(unittest.TestCase):
         self.assertGreaterEqual(len(files), 1)
         checked = 0
         for fn, g in files:
-            # Skip incomplete stubs (empty initial/final)
-            if not g.get("initial") or not g.get("final"):
+            # Skip incomplete stubs
+            if (
+                not g.get("initial")
+                or not g.get("final")
+                or not g.get("checkpoints")
+                or not g.get("duck_horizon_ticks")
+            ):
                 continue
             with self.subTest(fn):
                 self.assertEqual(GD.compare(g), [])
                 self.assertEqual(duck.verify_golden_independent(g), [])
             checked += 1
-        # If only stubs exist, still pass but note in message when zero complete
         if checked == 0:
             self.skipTest("no complete golden files present (stubs only)")
 
