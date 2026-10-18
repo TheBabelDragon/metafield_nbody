@@ -4,6 +4,11 @@ Deterministic, schema-compliant Newtonian N-body simulation with Forest-Ruth 4
 symplectic integration, FieldTick provenance, golden-pinned operators, a local
 3D Celestial Field Observatory, and an Interactive Dynamics Laboratory.
 
+**Recent (2026-10-18):** dimension-parameterised force operators (D = 2, 3, 4)
+and a laboratory logarithmic-Hamiltonian (extended phase-space) integrator
+following Preto & Tremaine / Mikkola & Tanikawa. See
+[`docs/ADAPTIVE_SYMPLECTIC_PLAN.md`](docs/ADAPTIVE_SYMPLECTIC_PLAN.md).
+
 ## Install & run
 
 Requires **Python 3.10+**. No third-party packages are required for the core
@@ -98,6 +103,9 @@ Browser (Three.js) — render coordinates = payload coordinates
   (`ε²`) as the force law (G = 1 normalized units).
 * **Lab experiments**: fixed-step integrators with versioned manifests
   (`config_digest`, `run_digest`, parent lineage). Isolated from FieldTick emission.
+* **Dimensional operators**: `physics.accelerations` / `invariants` / `forest_ruth4_step`
+  accept `dim` (default 3). When `dim=3` the floating-point sequence is identical
+  to the golden-pinned OPERATOR_VERSION 1.0.0 path.
 
 ### What is not claimed
 
@@ -106,6 +114,42 @@ Browser (Three.js) — render coordinates = payload coordinates
 * Trajectory separation tools are **numerical comparisons**, not Lyapunov proofs.
 * Adaptive-dt Forest-Ruth is not strictly symplectic; close encounters increase drift.
 * Exact cross-platform bitwise identity is not promised beyond IEEE-754 assumptions.
+* The LogH lab integrator is symplectic in the *extended* phase space; physical-time
+  adaptivity is a consequence of the time transformation, not an independent claim.
+
+## Dimensional generalisation (D = 2, 3, 4)
+
+Force law follows the D-dimensional Gauss-law convention:
+
+| D | Force magnitude | Notes |
+|---|-----------------|-------|
+| 2 | ∝ 1/r           | logarithmic potential |
+| 3 | ∝ 1/r²          | classic Newtonian (default) |
+| 4 | ∝ 1/r³          | extra coordinate `w` participates fully |
+
+Angular momentum is the full set of independent components of the antisymmetric
+tensor (1 component in 2-D, 3 in 3-D, 6 in 4-D).
+
+Scenarios and the FieldTick path remain 3-D for now; lab integrators and pure
+operators accept `dim`.
+
+## Logarithmic Hamiltonian integrator (lab)
+
+```python
+from metafield_nbody.integrators import get_step
+step = get_step("logh_leapfrog")
+x2, v2 = step(m, x, v, dtau, dim=3)   # dtau = fixed fictitious step
+```
+
+Or with full diagnostics:
+
+```python
+from metafield_nbody import logh as LH
+x2, v2, t2, info = LH.logh_leapfrog_step(m, x, v, dtau, dim=3, B=B, t=t)
+```
+
+References: Preto & Tremaine (1999), Mikkola & Tanikawa (1999).
+Design notes and limitations: `docs/ADAPTIVE_SYMPLECTIC_PLAN.md`.
 
 ## Verification
 
@@ -120,6 +164,8 @@ python -m metafield_nbody viz --scenario figure-8 --no-browser
 
 Integrity tests (`tests/test_integrity.py`) independently recompute K, U, E, P, L;
 verify Field→snapshot correspondence; verify export/replay; reject corrupted logs.
+
+New tests: `tests/test_dimensions.py`, `tests/test_logh.py`.
 
 ## Celestial Field Observatory
 
@@ -144,7 +190,7 @@ print(result["energy_analysis"]["rel_drift"])
 ```
 
 Lab integrators: `forest_ruth4_fixed`, `velocity_verlet`, `rk4`,
-`semi_implicit_euler`, `explicit_euler`.
+`semi_implicit_euler`, `explicit_euler`, **`logh_leapfrog`**.
 
 ## Contract & formal checks
 
@@ -154,5 +200,9 @@ laws. See `python -m metafield_nbody.checker`.
 ## Known limits (measured, not hidden)
 
 * Figure-8 return error is bounded by the 8-digit published ICs (~1.6e-8).
-* Adaptive dt is not strictly symplectic.
+* Adaptive dt (Forest-Ruth Field path) is not strictly symplectic.
+* LogH is symplectic in extended phase space; softening and multi-body encounters
+  limit the exact Kepler property to the idealised two-body inverse-square case.
 * Pure Python: ~10^4 ticks/s-scale; not for long production runs.
+* Scenario library and FieldTick emission remain 3-D; higher-D is available at the
+  operator / lab layer.
