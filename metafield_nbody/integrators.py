@@ -3,45 +3,8 @@
 The golden-pinned Forest-Ruth operator in physics.py is UNCHANGED and remains
 the sole integrator for NBodyField / FieldTick emission.
 
-This module provides a common fixed-step interface for laboratory experiments
-(method comparison, energy-drift studies, parameter sweeps). Lab runs do NOT
-emit FieldTicks unless explicitly requested via the experiment runner.
-
-Methods
--------
-forest_ruth4_fixed
-    Same composition as physics.forest_ruth4_step, fixed step size.
-    Symplectic 4th-order. Preferred baseline for gravitational N-body.
-
-velocity_verlet
-    Symplectic 2nd-order (Stormer-Verlet). Appropriate for conservative forces
-    that depend only on positions (Newtonian gravity with Plummer softening).
-
-rk4
-    Classical 4th-order Runge-Kutta. Non-symplectic; energy drifts secularly.
-    Useful as a reference for short-time accuracy, not long conservative runs.
-
-semi_implicit_euler
-    Symplectic Euler (Euler-Cromer). 1st-order symplectic. Stable for orbits
-    at moderate step sizes; large energy oscillation.
-
-explicit_euler
-    Forward Euler. Non-symplectic, unstable for orbital dynamics at large dt.
-    Included only for pedagogical comparison — not recommended for production.
-
-logh_leapfrog
-    Logarithmic Hamiltonian (extended phase-space) leapfrog (2nd order).
-    Preto & Tremaine (1999) / Mikkola & Tanikawa (1999).
-
-logh_yoshida4
-    Yoshida 4th-order composition of LogH leapfrogs.
-
-Assumptions
------------
-* Force depends only on positions (no velocity-dependent forces).
-* Softened Newtonian gravity (same as physics.accelerations), now
-  dimension-parameterised (dim=2,3,4).
-* Fixed step size for classical methods; LogH uses fixed fictitious step.
+Lab integrators accept optional dim (default 3). When dim==3, force evaluation
+delegates to physics.py; otherwise physics_nd is used.
 """
 from __future__ import annotations
 
@@ -49,6 +12,7 @@ from math import sqrt
 from typing import Callable, List, Tuple
 
 from . import physics as P
+from . import physics_nd as ND
 from . import logh as LH
 
 Vec = List[float]
@@ -62,7 +26,7 @@ def _copy_state(x, v):
 def _accelerations(m, x, G=None, soft2=None, dim=3):
     dim = int(dim)
     if G is None and soft2 is None:
-        return P.accelerations(m, x, dim=dim)
+        return ND.accelerations(m, x, dim=dim)
     G = P.G if G is None else float(G)
     eps2 = P.EPS2 if soft2 is None else float(soft2)
     n = len(m)
@@ -197,12 +161,10 @@ def explicit_euler(m, x, v, h, G=None, soft2=None, dim=3):
 
 
 def logh_leapfrog(m, x, v, h, G=None, soft2=None, dim=3):
-    """Logarithmic Hamiltonian leapfrog (fixed fictitious step h = Δτ)."""
     return LH.logh_leapfrog(m, x, v, h, G=G, soft2=soft2, dim=dim)
 
 
 def logh_yoshida4(m, x, v, h, G=None, soft2=None, dim=3):
-    """4th-order LogH via Yoshida composition (fixed fictitious step h = Δτ)."""
     return LH.logh_yoshida4(m, x, v, h, G=G, soft2=soft2, dim=dim)
 
 
@@ -289,5 +251,4 @@ def get_step(integrator_id: str) -> Callable:
 
 
 def invariants(m, x, v, G=None, soft2=None, dim=3):
-    """Lab invariants; delegates to physics when using default constants."""
-    return P.invariants(m, x, v, dim=dim)
+    return ND.invariants(m, x, v, dim=dim)
