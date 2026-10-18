@@ -10,6 +10,11 @@ async function labPost(path, body) {
   return await r.json();
 }
 
+function labDim() {
+  const el = document.getElementById("lab-dim");
+  return el ? parseInt(el.value, 10) || 3 : 3;
+}
+
 async function labLoadIntegrators() {
   const sel = document.getElementById("lab-integrator");
   if (!sel) return;
@@ -72,41 +77,46 @@ async function labRun(overrides = {}) {
   const body = {
     scenario: (document.getElementById("lab-scenario") || {}).value || "1",
     integrator_id: overrides.integrator_id || (document.getElementById("lab-integrator") || {}).value || "forest_ruth4_fixed",
-    dt: +(document.getElementById("lab-dt") || {}).value || 0.001,
-    n_steps: +(document.getElementById("lab-steps") || {}).value || 1000,
-    record_trajectories: false,
+    dt: parseFloat((document.getElementById("lab-dt") || {}).value || "0.001"),
+    n_steps: parseInt((document.getElementById("lab-steps") || {}).value || "1000", 10),
+    dim: overrides.dim != null ? overrides.dim : labDim(),
     label: overrides.label || "",
+    record_trajectories: true,
   };
-  const out = document.getElementById("lab-result");
-  if (out) out.textContent = "running…";
-  const data = await labPost("/api/lab/run", body);
-  if (!data.ok) {
-    if (out) out.textContent = "ERR " + (data.msg || "failed");
-    return;
+  const el = document.getElementById("lab-result");
+  if (el) el.textContent = "running…";
+  try {
+    const data = await labPost("/api/lab/run", body);
+    if (!data.ok) {
+      if (el) el.textContent = "ERR " + (data.msg || JSON.stringify(data));
+      return;
+    }
+    const r = data.result;
+    labState.lastIds.push(r.experiment_id);
+    if (labState.lastIds.length > 20) labState.lastIds = labState.lastIds.slice(-20);
+    if (el) {
+      el.textContent = JSON.stringify({
+        experiment_id: r.experiment_id,
+        status: r.status,
+        method: r.config && r.config.integration && r.config.integration.method,
+        dim: r.dim != null ? r.dim : (r.config && r.config.model && r.config.model.dim),
+        rel_drift: r.energy_analysis && r.energy_analysis.rel_drift,
+        max_abs_drift: r.energy_analysis && r.energy_analysis.max_abs_drift,
+        run_digest: (r.run_digest || "").slice(0, 16) + "…",
+      }, null, 2);
+    }
+    if (r.series) labDrawDrift(r.series);
+    const set = (id, v) => { const n = document.getElementById(id); if (n) n.textContent = v; };
+    if (r.energy_analysis) {
+      set("lab-e0", r.energy_analysis.E0 != null ? Number(r.energy_analysis.E0).toExponential(6) : "—");
+      set("lab-rel", r.energy_analysis.rel_drift != null ? Number(r.energy_analysis.rel_drift).toExponential(6) : "—");
+      set("lab-maxd", r.energy_analysis.max_abs_drift != null ? Number(r.energy_analysis.max_abs_drift).toExponential(6) : "—");
+      set("lab-meand", r.energy_analysis.mean_abs_drift != null ? Number(r.energy_analysis.mean_abs_drift).toExponential(6) : "—");
+    }
+    labRefreshHistory();
+  } catch (e) {
+    if (el) el.textContent = String(e);
   }
-  const r = data.result;
-  labState.lastIds.push(r.experiment_id);
-  if (labState.lastIds.length > 8) labState.lastIds.shift();
-  const ea = r.energy_analysis || {};
-  if (out) {
-    out.textContent = JSON.stringify({
-      id: r.experiment_id,
-      status: r.status,
-      method: r.config.integration.method,
-      dt: r.config.integration.dt,
-      n_steps: r.config.integration.n_steps,
-      rel_drift: ea.rel_drift,
-      max_abs_drift: ea.max_abs_drift,
-      run_digest: (r.run_digest || "").slice(0, 16) + "…",
-    }, null, 2);
-  }
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set("lab-e0", ea.E0 != null ? Number(ea.E0).toPrecision(8) : "—");
-  set("lab-rel", ea.rel_drift != null ? Number(ea.rel_drift).toExponential(4) : "—");
-  set("lab-maxd", ea.max_abs_drift != null ? Number(ea.max_abs_drift).toExponential(4) : "—");
-  set("lab-meand", ea.mean_abs_drift != null ? Number(ea.mean_abs_drift).toExponential(4) : "—");
-  if (r.series) labDrawDrift(r.series);
-  await labRefreshHistory();
 }
 
 async function labRefreshHistory() {
@@ -118,7 +128,9 @@ async function labRefreshHistory() {
     const list = data.experiments || [];
     if (!list.length) { el.textContent = "no experiments yet"; return; }
     el.textContent = list.map((e) =>
-      e.experiment_id + " · " + e.method + " · dt=" + e.dt + " · drift=" +
+      e.experiment_id + " · " + e.method +
+      (e.dim != null ? " · D" + e.dim : "") +
+      " · dt=" + e.dt + " · drift=" +
       (e.rel_drift != null ? Number(e.rel_drift).toExponential(3) : "—") + " · " + e.status
     ).join("\n");
   } catch (e) {
@@ -134,6 +146,7 @@ async function labSweepDt() {
     integrator_id: (document.getElementById("lab-integrator") || {}).value || "rk4",
     dt: 1e-3,
     n_steps: 200,
+    dim: labDim(),
     parameter: "dt",
     values: [1e-3, 2e-3, 5e-3],
     label_prefix: "dt-sweep",
@@ -166,6 +179,10 @@ function labBind() {
   document.getElementById("lab-run").addEventListener("click", () => labRun());
   document.getElementById("lab-run-rk4").addEventListener("click", () => labRun({ integrator_id: "rk4", label: "ui-rk4" }));
   document.getElementById("lab-run-fr").addEventListener("click", () => labRun({ integrator_id: "forest_ruth4_fixed", label: "ui-fr" }));
+  const logh2 = document.getElementById("lab-run-logh");
+  if (logh2) logh2.addEventListener("click", () => labRun({ integrator_id: "logh_leapfrog", label: "ui-logh2" }));
+  const logh4 = document.getElementById("lab-run-logh4");
+  if (logh4) logh4.addEventListener("click", () => labRun({ integrator_id: "logh_yoshida4", label: "ui-logh4" }));
   document.getElementById("lab-sweep-dt").addEventListener("click", labSweepDt);
   document.getElementById("lab-sweep-cancel").addEventListener("click", () => labPost("/api/lab/sweep_cancel", {}));
   document.getElementById("lab-compare").addEventListener("click", labCompare);
