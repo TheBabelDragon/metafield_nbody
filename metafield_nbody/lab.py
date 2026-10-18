@@ -61,10 +61,11 @@ def run_experiment(
 ):
     cfg = copy.deepcopy(config)
     ic = cfg["ic"]
+    dim = int(cfg.get("model", {}).get("dim", ic.get("dim", 3)))
     m = [float(x) for x in ic["m"]]
     x = [list(p) for p in ic["x"]]
     v = [list(q) for q in ic["v"]]
-    E.validate_bodies(m, x, v)
+    E.validate_bodies(m, x, v, dim=dim)
 
     method = cfg["integration"]["method"]
     dt = float(cfg["integration"]["dt"])
@@ -73,7 +74,7 @@ def run_experiment(
     soft2 = float(cfg["model"]["softening"]) ** 2
     step_fn = get_step(method)
 
-    inv0 = lab_invariants(m, x, v, G=G, soft2=soft2)
+    inv0 = lab_invariants(m, x, v, G=G, soft2=soft2, dim=dim)
     history = [{
         "t": 0.0,
         "step": 0,
@@ -94,14 +95,14 @@ def run_experiment(
             if cancel_event is not None and cancel_event.is_set():
                 status = "cancelled"
                 raise Cancelled()
-            x, v = step_fn(m, x, v, dt, G=G, soft2=soft2)
+            x, v = step_fn(m, x, v, dt, G=G, soft2=soft2, dim=dim)
             t += dt
             for i in range(len(m)):
-                for c in range(3):
+                for c in range(dim):
                     if not (x[i][c] == x[i][c] and v[i][c] == v[i][c]):
                         raise FloatingPointError("non-finite state at step %d" % s)
             if s % sample_stride == 0 or s == n_steps:
-                inv = lab_invariants(m, x, v, G=G, soft2=soft2)
+                inv = lab_invariants(m, x, v, G=G, soft2=soft2, dim=dim)
                 history.append({
                     "t": t,
                     "step": s,
@@ -119,7 +120,7 @@ def run_experiment(
         status = "failed"
         error_msg = "%s: %s" % (type(exc).__name__, exc)
 
-    inv_f = lab_invariants(m, x, v, G=G, soft2=soft2)
+    inv_f = lab_invariants(m, x, v, G=G, soft2=soft2, dim=dim)
     drift = _energy_series(history)
     wall = time.monotonic() - t0
 
@@ -160,9 +161,10 @@ def run_experiment(
             "energy": drift["energy"],
             "rel_drift": drift["rel_drift_series"],
         },
-        "final_state": {"m": m, "x": [list(p) for p in x], "v": [list(q) for q in v]},
+        "final_state": {"m": m, "x": [list(p) for p in x], "v": [list(q) for q in v], "dim": dim},
         "trails": trails,
         "sample_stride": sample_stride,
+        "dim": dim,
     }
     digest_payload = {
         "config_digest": cfg.get("config_digest"),
@@ -170,6 +172,7 @@ def run_experiment(
         "final_energy": inv_f["energy"],
         "rel_drift": drift["rel_drift"],
         "n_samples": len(history),
+        "dim": dim,
     }
     result["run_digest"] = hashlib.sha256(
         json.dumps(digest_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -198,6 +201,7 @@ def compare_experiments(results):
                 "method": r["config"]["integration"]["method"],
                 "dt": r["config"]["integration"]["dt"],
                 "n_steps": r["config"]["integration"]["n_steps"],
+                "dim": r.get("dim", r["config"].get("model", {}).get("dim", 3)),
                 "rel_drift": r["energy_analysis"]["rel_drift"],
                 "max_abs_drift": r["energy_analysis"]["max_abs_drift"],
                 "status": r["status"],
@@ -212,6 +216,9 @@ def compare_experiments(results):
 def trajectory_separation(a, b):
     if not a.get("trails") or not b.get("trails"):
         raise ValueError("both results need recorded trajectories")
+    dim = int(a.get("dim", 3))
+    if int(b.get("dim", 3)) != dim:
+        raise ValueError("dimensionality mismatch between results")
     na, nb = len(a["trails"]), len(b["trails"])
     n = min(na, nb)
     seps = []
@@ -224,7 +231,7 @@ def trajectory_separation(a, b):
         for i in range(n):
             pa = a["trails"][i][k]
             pb = b["trails"][i][k]
-            d = math.sqrt(sum((pa[c] - pb[c]) ** 2 for c in range(3)))
+            d = math.sqrt(sum((pa[c] - pb[c]) ** 2 for c in range(dim)))
             dmax = max(dmax, d)
             dsum += d
         seps.append({
@@ -239,6 +246,7 @@ def trajectory_separation(a, b):
             "Not a verified Lyapunov exponent; not a proof of chaos."
         ),
         "n_samples": n_samples,
+        "dim": dim,
         "series": seps,
         "final_max_sep": seps[-1]["max_sep"] if seps else None,
         "final_mean_sep": seps[-1]["mean_sep"] if seps else None,
@@ -264,6 +272,7 @@ class LabStore:
                     "status": r["status"],
                     "method": r["config"]["integration"]["method"],
                     "dt": r["config"]["integration"]["dt"],
+                    "dim": r.get("dim", r["config"].get("model", {}).get("dim", 3)),
                     "rel_drift": r["energy_analysis"].get("rel_drift"),
                     "parent_id": r["config"].get("parent_id"),
                     "run_digest": r.get("run_digest"),
