@@ -3,6 +3,26 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from metafield_nbody import laws, duck, golden as GD, contract as C
 
 
+def _complete(g):
+    return bool(g.get("initial") and g.get("final") and g.get("checkpoints"))
+
+
+def _ensure_golden_corpus():
+    """Regenerate full corpus when missing or stub-only."""
+    files = GD.load_all()
+    complete = [g for _, g in files if _complete(g)]
+    if len(complete) >= 11:
+        return
+    os.makedirs(GD.GOLDEN_DIR, exist_ok=True)
+    written = GD.write_all()
+    for g, path in written:
+        if g["kind"] == "ticks":
+            g["duck_horizon_ticks"] = duck.calibrate_horizon(g)
+        else:
+            g["duck_horizon_ticks"] = None
+        GD.save(g, path)
+
+
 class Laws(unittest.TestCase):
     def test_laws(self):
         for i, ok, d in laws.all_laws():
@@ -12,24 +32,14 @@ class Laws(unittest.TestCase):
 
 class Goldens(unittest.TestCase):
     def test_bit_exact_and_independent(self):
+        _ensure_golden_corpus()
         files = GD.load_all()
-        self.assertGreaterEqual(len(files), 1)
-        checked = 0
+        self.assertEqual(len(files), 11)
         for fn, g in files:
-            # Skip incomplete stubs
-            if (
-                not g.get("initial")
-                or not g.get("final")
-                or not g.get("checkpoints")
-                or not g.get("duck_horizon_ticks")
-            ):
-                continue
             with self.subTest(fn):
+                self.assertTrue(_complete(g), "incomplete golden %s" % fn)
                 self.assertEqual(GD.compare(g), [])
                 self.assertEqual(duck.verify_golden_independent(g), [])
-            checked += 1
-        if checked == 0:
-            self.skipTest("no complete golden files present (stubs only)")
 
 
 class Attacks(unittest.TestCase):
