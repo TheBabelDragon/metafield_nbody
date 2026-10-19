@@ -32,10 +32,52 @@ const state = {
   fps: 0,
   pollHz: 0,
   latency: 0,
+  projectAxes: [0, 1, 2],
+  labOverlay: false,
+  labTrails: null,
 };
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("c");
+
+function readProjectionUI() {
+  const rx = $("proj-x"), ry = $("proj-y"), rz = $("proj-z");
+  if (!rx || !ry || !rz) return;
+  state.projectAxes = [parseInt(rx.value, 10) || 0, parseInt(ry.value, 10) || 1, parseInt(rz.value, 10) || 2];
+}
+function projectPoint(coords) {
+  if (!coords || !coords.length) return [0, 0, 0];
+  const ax = state.projectAxes;
+  return [ax[0] < coords.length ? coords[ax[0]] : 0, ax[1] < coords.length ? coords[ax[1]] : 0, ax[2] < coords.length ? coords[ax[2]] : 0];
+}
+let labOverlayLines = [];
+function clearLabOverlay() {
+  if (typeof scene === "undefined") return;
+  labOverlayLines.forEach((l) => scene.remove(l));
+  labOverlayLines = [];
+}
+function updateLabOverlay() {
+  clearLabOverlay();
+  if (!state.labOverlay || !state.labTrails || typeof scene === "undefined") return;
+  state.labTrails.forEach((trail, i) => {
+    if (!trail || !trail.length) return;
+    const arr = new Float32Array(trail.length * 3);
+    for (let k = 0; k < trail.length; k++) {
+      const q = projectPoint(trail[k]);
+      arr[k * 3] = q[0]; arr[k * 3 + 1] = q[1]; arr[k * 3 + 2] = q[2];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    const mat = new THREE.LineBasicMaterial({ color: BODY_COLORS[i % BODY_COLORS.length], transparent: true, opacity: 0.85 });
+    const line = new THREE.Line(geo, mat);
+    scene.add(line);
+    labOverlayLines.push(line);
+  });
+}
+window.metafieldSetLabTrails = function (trails, dim) {
+  state.labTrails = trails;
+  if (state.labOverlay) updateLabOverlay();
+};
 
 document.querySelectorAll("#tabs button").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -70,11 +112,32 @@ bindToggle("tog-com", "showCom");
 bindToggle("tog-axes", "showAxes");
 bindToggle("tog-bloom", "bloom");
 bindToggle("tog-cinematic", "cinematic");
-
-$("trail-len").addEventListener("input", (e) => {
-  state.trailLen = +e.target.value;
-  $("trail-len-val").textContent = state.trailLen;
+["proj-x", "proj-y", "proj-z"].forEach((id) => {
+  const el = $(id);
+  if (!el) return;
+  el.addEventListener("change", () => {
+    readProjectionUI();
+    if (state.data) updateBodies(state.data);
+    if (state.labOverlay) updateLabOverlay();
+  });
 });
+const labOverlayEl = $("tog-lab-overlay");
+if (labOverlayEl) {
+  labOverlayEl.addEventListener("change", () => {
+    state.labOverlay = labOverlayEl.checked;
+    if (state.labOverlay) updateLabOverlay();
+    else clearLabOverlay();
+  });
+}
+
+const trailLenEl = $("trail-len");
+if (trailLenEl) {
+  trailLenEl.addEventListener("input", (e) => {
+    state.trailLen = +e.target.value;
+    const v = $("trail-len-val");
+    if (v) v.textContent = state.trailLen;
+  });
+}
 const tvs = $("trail-vec-stride");
 if (tvs) {
   tvs.addEventListener("input", (e) => {
@@ -83,15 +146,23 @@ if (tvs) {
     if (state.data) updatePermanentTrails(state.data);
   });
 }
-$("vec-scale").addEventListener("input", (e) => {
-  state.vecScale = +e.target.value;
-  $("vec-scale-val").textContent = state.vecScale;
-});
-$("body-scale").addEventListener("input", (e) => {
-  state.bodyScale = +e.target.value;
-  $("body-scale-val").textContent = state.bodyScale;
-  if (state.data) resizeBodies(state.data.bodies);
-});
+const vecScaleEl = $("vec-scale");
+if (vecScaleEl) {
+  vecScaleEl.addEventListener("input", (e) => {
+    state.vecScale = +e.target.value;
+    const v = $("vec-scale-val");
+    if (v) v.textContent = state.vecScale;
+  });
+}
+const bodyScaleEl = $("body-scale");
+if (bodyScaleEl) {
+  bodyScaleEl.addEventListener("input", (e) => {
+    state.bodyScale = +e.target.value;
+    const v = $("body-scale-val");
+    if (v) v.textContent = state.bodyScale;
+    if (state.data) resizeBodies(state.data.bodies);
+  });
+}
 const bcp = $("btn-clear-perm");
 if (bcp) bcp.addEventListener("click", () => cmd("clear_permanent_trails"));
 
@@ -287,8 +358,8 @@ function updatePermanentTrails(data) {
     const n = samples.length;
     const arr = new Float32Array(n * 3);
     for (let k = 0; k < n; k++) {
-      const x = samples[k].x;
-      arr[k * 3] = x[0]; arr[k * 3 + 1] = x[1]; arr[k * 3 + 2] = x[2];
+      const q = projectPoint(samples[k].x);
+      arr[k * 3] = q[0]; arr[k * 3 + 1] = q[1]; arr[k * 3 + 2] = q[2];
     }
     permTrailLines[i].geometry.setAttribute("position", new THREE.BufferAttribute(arr, 3));
     permTrailLines[i].geometry.setDrawRange(0, n);
@@ -303,7 +374,7 @@ function updatePermanentTrails(data) {
     const seg = new Float32Array(indices.length * 6);
     for (let j = 0; j < indices.length; j++) {
       const s = samples[indices[j]];
-      const x = s.x, v = s.v, o = j * 6;
+      const x = projectPoint(s.x), v = projectPoint(s.v || [0, 0, 0]), o = j * 6;
       seg[o] = x[0]; seg[o + 1] = x[1]; seg[o + 2] = x[2];
       seg[o + 3] = x[0] + v[0] * vScale;
       seg[o + 4] = x[1] + v[1] * vScale;
@@ -330,15 +401,19 @@ function updateBodies(data) {
   const bodies = data.bodies;
   if (bodyMeshes.length !== bodies.length) rebuildBodies(bodies);
   bodies.forEach((b, i) => {
-    bodyMeshes[i].position.set(b.x[0], b.x[1], b.x[2]);
-    if (state.showVel) setArrow(velArrows[i], b.x, b.v, state.vecScale);
-    if (state.showAcc) setArrow(accArrows[i], b.x, b.a, state.vecScale * 0.5);
-    labelSprites[i].position.set(b.x[0], b.x[1] + massRadius(b.m) + 0.08, b.x[2]);
+    const px = projectPoint(b.x);
+    const pv = projectPoint(b.v || [0, 0, 0]);
+    const pa = projectPoint(b.a || [0, 0, 0]);
+    bodyMeshes[i].position.set(px[0], px[1], px[2]);
+    if (state.showVel) setArrow(velArrows[i], px, pv, state.vecScale);
+    if (state.showAcc) setArrow(accArrows[i], px, pa, state.vecScale * 0.5);
+    labelSprites[i].position.set(px[0], px[1] + massRadius(b.m) + 0.08, px[2]);
     if (state.trails && data.trails && data.trails[i]) {
       const pts = data.trails[i].slice(-state.trailLen);
       const arr = new Float32Array(pts.length * 3);
       for (let k = 0; k < pts.length; k++) {
-        arr[k * 3] = pts[k][0]; arr[k * 3 + 1] = pts[k][1]; arr[k * 3 + 2] = pts[k][2];
+        const q = projectPoint(pts[k]);
+        arr[k * 3] = q[0]; arr[k * 3 + 1] = q[1]; arr[k * 3 + 2] = q[2];
       }
       trailLines[i].geometry.setAttribute("position", new THREE.BufferAttribute(arr, 3));
       trailLines[i].geometry.setDrawRange(0, pts.length);
@@ -347,13 +422,15 @@ function updateBodies(data) {
   });
   updatePermanentTrails(data);
   const com = data.invariants.com;
-  comMesh.position.set(com[0], com[1], com[2]);
+  const pc = projectPoint(com);
+  comMesh.position.set(pc[0], pc[1], pc[2]);
+  if (state.labOverlay && state.labTrails) updateLabOverlay();
 }
 
 function frameAll() {
   if (!state.data || !state.data.bodies.length) return;
   const box = new THREE.Box3();
-  state.data.bodies.forEach((b) => box.expandByPoint(new THREE.Vector3(b.x[0], b.x[1], b.x[2])));
+  state.data.bodies.forEach((b) => box.expandByPoint(new THREE.Vector3(...projectPoint(b.x))));
   const size = box.getSize(new THREE.Vector3()).length() || 2;
   const center = box.getCenter(new THREE.Vector3());
   const dist = Math.max(size * 0.9, 1.5);
@@ -487,113 +564,98 @@ function updateUI(data) {
   $("f-prev").textContent = data.field.prev_digest ? data.field.prev_digest.slice(0, 16) + "\u2026" : "\u2014";
   $("f-count").textContent = data.field.tick_count;
   $("f-dt").textContent = fmt(data.field.last_dt, 6);
-  $("f-contract").textContent = data.field.contract_ok ? "admitted" : "fail";
-  $("f-contract").style.color = data.field.contract_ok ? "var(--green)" : "var(--red)";
-  $("f-op").textContent = `${data.field.operator.name} v${data.field.operator.version}`;
+  $("f-contract").textContent = data.field.contract_ok ? "OK" : "FAIL";
+  $("f-op").textContent = data.field.operator?.name || "\u2014";
 
-  const pt = $("pair-table");
-  if (data.pairs && data.pairs.length) {
-    let ph = "<table><tr><th>i\u2013j</th><th>r</th><th>|F|</th></tr>";
-    data.pairs.forEach((p) => {
-      ph += `<tr><td>${p.i}\u2013${p.j}</td><td>${fmt(p.r, 5)}</td><td>${fmt(p.force_mag, 4)}</td></tr>`;
-    });
-    pt.innerHTML = ph + "</table>";
-  }
-
-  $("btn-play").textContent = data.sim.playing ? "\u23F8" : "\u25B6";
-  const sel = $("sel-scenario");
-  if (sel.value !== data.scenario.key && [...sel.options].some((o) => o.value === data.scenario.key)) {
-    sel.value = data.scenario.key;
-  }
   updateSelectionUI();
-  drawPlots(data.history);
+  drawPlots(data);
 }
 
 function updateSelectionUI() {
-  const info = $("sel-body-info");
-  const tip = $("body-tooltip");
-  if (state.selectedBody === null || !state.data) {
-    info.textContent = "Click a body in the scene";
-    tip.classList.add("hidden");
-    return;
-  }
+  const el = $("sel-body-info");
+  if (!el || !state.data) return;
+  if (state.selectedBody == null) { el.textContent = "Click a body"; return; }
   const b = state.data.bodies[state.selectedBody];
-  if (!b) return;
-  const txt = `Body ${state.selectedBody}\nm = ${fmt(b.m, 6)}\nx = (${fmtVec(b.x)})\nv = (${fmtVec(b.v)})\na = (${fmtVec(b.a)})`;
-  info.textContent = txt;
-  tip.textContent = txt;
-  tip.classList.remove("hidden");
+  if (!b) { el.textContent = "Click a body"; return; }
+  el.textContent = `B${state.selectedBody}  m=${fmt(b.m, 5)}\nx=${fmtVec(b.x)}\nv=${fmtVec(b.v)}\na=${fmtVec(b.a)}`;
+  const pairs = (state.data.pairs || []).filter((p) => p.i === state.selectedBody || p.j === state.selectedBody);
+  const pt = $("pair-table");
+  if (pt) pt.textContent = pairs.map((p) => `${p.i}-${p.j}: r=${fmt(p.r, 5)} F=${fmt(p.force_mag, 4)}`).join("\n") || "\u2014";
 }
 
-function drawPlots(hist) {
-  if (!hist || !hist.t || hist.t.length < 2) return;
-  drawSeries($("plot-energy"), hist.t, [hist.energy], ["E"], ["#3ecfef"]);
-  drawSeries($("plot-drift"), hist.t, [hist.energy_drift], ["|\u0394E|/|E\u2080|"], ["#f0b429"]);
-  drawSeries($("plot-mom"), hist.t, [hist.momentum_mag, hist.L_mag], ["|P|", "|L|"], ["#a78bfa", "#34d399"]);
+function drawPlots(data) {
+  const h = data.history;
+  if (!h || !h.t || h.t.length < 2) return;
+  drawSeries($("plot-energy"), h.t, [h.energy], ["E"], ["#3ecfef"]);
+  drawSeries($("plot-drift"), h.t, [h.energy_drift], ["dE/E0"], ["#f0b429"]);
+  drawSeries($("plot-mom"), h.t, [h.momentum_mag, h.L_mag], ["|P|", "|L|"], ["#a78bfa", "#34d399"]);
 }
 
 function drawSeries(canvas, xs, series, labels, colors) {
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = "#0c1220";
   ctx.fillRect(0, 0, w, h);
-  let ymin = Infinity, ymax = -Infinity;
-  series.forEach((s) => s.forEach((v) => { if (v < ymin) ymin = v; if (v > ymax) ymax = v; }));
-  if (!isFinite(ymin) || !isFinite(ymax)) return;
+  const flat = series.flat();
+  let ymin = Math.min(...flat), ymax = Math.max(...flat);
   if (ymin === ymax) { ymin -= 1; ymax += 1; }
-  const pad = (ymax - ymin) * 0.08 || 1e-15;
+  const pad = (ymax - ymin) * 0.08 || 1e-12;
   ymin -= pad; ymax += pad;
   const xmin = xs[0], xmax = xs[xs.length - 1] || xmin + 1;
   const lx = 36, rx = 8, ty = 10, by = 18;
   const pw = w - lx - rx, ph = h - ty - by;
-  ctx.strokeStyle = "#1a2740"; ctx.lineWidth = 1;
+  ctx.strokeStyle = "#1a2740";
   ctx.beginPath(); ctx.moveTo(lx, ty); ctx.lineTo(lx, ty + ph); ctx.lineTo(lx + pw, ty + ph); ctx.stroke();
-  ctx.fillStyle = "#6b7c96"; ctx.font = "9px monospace"; ctx.textAlign = "right";
-  ctx.fillText(fmt(ymax, 3), lx - 3, ty + 8);
-  ctx.fillText(fmt(ymin, 3), lx - 3, ty + ph);
-  series.forEach((s, si) => {
-    ctx.strokeStyle = colors[si]; ctx.lineWidth = 1.5; ctx.beginPath();
-    for (let i = 0; i < s.length; i++) {
+  series.forEach((ys, si) => {
+    ctx.strokeStyle = colors[si];
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let i = 0; i < ys.length; i++) {
       const x = lx + ((xs[i] - xmin) / (xmax - xmin || 1)) * pw;
-      const y = ty + ph - ((s[i] - ymin) / (ymax - ymin || 1)) * ph;
+      const y = ty + ph - ((ys[i] - ymin) / (ymax - ymin || 1)) * ph;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
   });
-  ctx.textAlign = "left";
+  ctx.fillStyle = "#8b9bb4";
+  ctx.font = "10px monospace";
   labels.forEach((lab, i) => { ctx.fillStyle = colors[i]; ctx.fillText(lab, lx + 6 + i * 50, ty + 10); });
 }
 
 let frames = 0, fpsT = performance.now();
-function renderLoop(now) {
-  requestAnimationFrame(renderLoop);
+function animate() {
+  requestAnimationFrame(animate);
   onResize();
   controls.update();
-  if (state.bloom) composer.render(); else renderer.render(scene, camera);
+  if (state.bloom) composer.render();
+  else renderer.render(scene, camera);
   frames++;
+  const now = performance.now();
   if (now - fpsT > 500) {
     state.fps = (frames * 1000) / (now - fpsT);
     frames = 0; fpsT = now;
   }
 }
-requestAnimationFrame(renderLoop);
+animate();
 
-let pollCount = 0, pollT = performance.now(), framedOnce = false;
+let pollCount = 0, pollT = performance.now();
 async function poll() {
   const t0 = performance.now();
   try {
     const r = await fetch("/api/state");
     const data = await r.json();
-    state.latency = performance.now() - t0;
-    state.data = data;
-    updateBodies(data);
-    updateUI(data);
-    $("conn-status").textContent = "connected \u00b7 live";
-    $("conn-status").style.color = "var(--green)";
-    if (!framedOnce && data.bodies.length) { frameAll(); framedOnce = true; }
+    if (data.ok) {
+      state.data = data;
+      state.latency = performance.now() - t0;
+      updateBodies(data);
+      updateUI(data);
+      $("conn-status").textContent = "live";
+      $("conn-status").style.color = "var(--green)";
+    }
   } catch (e) {
-    $("conn-status").textContent = "disconnected";
+    $("conn-status").textContent = "offline";
     $("conn-status").style.color = "var(--red)";
   }
   pollCount++;
