@@ -144,7 +144,7 @@ class VizSession:
                 "trails": trails,
                 "permanent_trails": [
                     [{"x": s["x"], "v": s["v"], "t": s["t"], "tick": s["tick"]}
-                     for s in body_trail]
+                     for s in body_trail[-1500:]]
                     for body_trail in self.permanent_trails
                 ],
                 "permanent_trail_meta": {
@@ -300,33 +300,83 @@ class VizHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
+    def _client_gone(self, exc):
+        """True when the browser closed the socket mid-response (not a server bug)."""
+        return isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError))
+
+    def _safe_write(self, data: bytes) -> bool:
+        try:
+            self.wfile.write(data)
+            return True
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return False
+        except OSError as exc:
+            # EPIPE / ECONNRESET on some platforms surface as generic OSError
+            if getattr(exc, "errno", None) in (32, 104):
+                return False
+            raise
+
     def _json(self, code, obj):
-        body = json.dumps(obj, allow_nan=False).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self._cors()
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(obj, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            body = json.dumps({"ok": False, "msg": "serialize error: %s" % exc}).encode("utf-8")
+            code = 500
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._cors()
+            self.end_headers()
+            self._safe_write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (32, 104):
+                return
+            raise
 
     def _file(self, path, ctype="text/html"):
         try:
             with open(path, "rb") as f:
                 data = f.read()
         except OSError:
-            self.send_error(404)
+            try:
+                self.send_error(404)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                pass
             return
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self._cors()
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self._cors()
+            self.end_headers()
+            self._safe_write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        except OSError as exc:
+            if getattr(exc, "errno", None) in (32, 104):
+                return
+            raise
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self._cors()
-        self.end_headers()
+        try:
+            self.send_response(204)
+            self._cors()
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            return
+
+    def handle_one_request(self):
+        """Suppress traceback noise when the client drops the connection."""
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except OSError as exc:
+            if getattr(exc, "errno", None) not in (32, 104):
+                raise
 
     def do_GET(self):
         parsed = urlparse(self.path)
